@@ -83,3 +83,24 @@ test('screenshots are sent as image blocks and saved even without text', async (
   await assert.rejects(service.send({ text: '', images: Array(5).fill(image) }));
   assert.equal(service.busy, false);
 });
+
+test('image transport accepts files over the old 5 MB cap and rejects files over 30 MB', async () => {
+  // A signature-bearing payload tests transport limits; the mocked SDK does not decode it.
+  const bytes = Buffer.alloc(6 * 1024 * 1024);
+  Buffer.from([137,80,78,71,13,10,26,10]).copy(bytes);
+  const image = { type: 'image/png', data: bytes.toString('base64') };
+  let received;
+  const { service, root } = fixture(({ prompt }) => (async function* () {
+    for await (const item of prompt) received = item;
+    yield { type: 'result', subtype: 'success', result: 'Received' };
+  })());
+  try {
+    await service.send({ text: 'Screenshot', images: [image] }); await idle(service);
+    assert.equal(received.message.content[0].source.data, image.data);
+    const count = service.session().messages.length;
+    const oversized = { type: 'image/png', data: Buffer.alloc(30 * 1024 * 1024 + 1).toString('base64') };
+    await assert.rejects(service.send({ text: '', images: [oversized] }), /30 MB/);
+    assert.equal(service.session().messages.length, count);
+    assert.equal(service.busy, false);
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});

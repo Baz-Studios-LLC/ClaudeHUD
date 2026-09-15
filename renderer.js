@@ -137,7 +137,7 @@ bridge.onExpansion(({ expanded, transitioning }) => {
 bridge.onSettings(() => showSettings(true));
 bridge.onPreferences(value => {
   $('#opacity').value = Math.round(value.opacity * 100); $('#sound').checked = value.sound;
-  $('#shortcut').value = value.shortcut; $('#shortcut-hint').textContent = $('#shortcut').selectedOptions[0].textContent;
+  $('#shortcut').value = value.shortcut;
   showSettings(value.settingsOpen, false);
 });
 bridge.onShortcut(ok => { if (!ok) $('#settings-note').textContent = 'Hotkey unavailable. Choose another shortcut in settings.'; });
@@ -153,15 +153,25 @@ $('#sound').onchange = () => { action('sound', $('#sound').checked); if ($('#sou
 document.addEventListener('pointerdown', () => { if ($('#sound').checked) { audio ||= new AudioContext(); audio.resume(); } });
 $('#shortcut').onchange = async event => {
   const ok = await action('shortcut', event.target.value); $('#settings-note').textContent = ok ? 'Shortcut updated.' : 'That shortcut is unavailable. Try another.';
-  if (ok) $('#shortcut-hint').textContent = event.target.selectedOptions[0].textContent;
 };
 document.addEventListener('keydown', event => { if (event.key === 'Escape') { if (!$('#settings').hidden) showSettings(false); else action('collapse'); } });
 async function submit() {
   const text = $('#prompt').value.trim(); if ((!text && !attachments.length) || busy || pasting) return;
   const sent = [...attachments];
   busy = true; controls(); const result = await claude('send', { text, images: sent.map(({ type, data }) => ({ type, data })) });
-  if (result) { $('#prompt').value = ''; attachments = attachments.filter(item => !sent.includes(item)); renderAttachments(); } else { busy = false; controls(); }
+  if (result) { $('#prompt').value = ''; resizePrompt(); attachments = attachments.filter(item => !sent.includes(item)); renderAttachments(); } else { busy = false; controls(); }
 }
+function resizePrompt() {
+  const prompt = $('#prompt');
+  prompt.style.height = '30px';
+  prompt.style.height = `${Math.min(110, Math.max(30, prompt.scrollHeight))}px`;
+}
+$('#prompt').addEventListener('input', resizePrompt);
+let promptWidth = 0;
+new ResizeObserver(entries => {
+  const width = entries[0].contentRect.width;
+  if (width > 0 && width !== promptWidth) { promptWidth = width; requestAnimationFrame(resizePrompt); }
+}).observe($('#prompt'));
 function renderAttachments() {
   $('#attachments').replaceChildren(); $('#attachments').hidden = !attachments.length;
   for (const attachment of attachments) {
@@ -181,7 +191,7 @@ $('#prompt').addEventListener('paste', async event => {
     for (const file of files) {
       if (attachments.length >= 4) throw new Error('You can attach up to four screenshots per message.');
       if (!['image/png', 'image/jpeg', 'image/webp', 'image/gif'].includes(file.type)) throw new Error('Paste a PNG, JPEG, WebP, or GIF image.');
-      if (file.size > 5 * 1024 * 1024) throw new Error('That screenshot is larger than 5 MB. Crop it or use a smaller image.');
+      if (file.size > 30 * 1024 * 1024) throw new Error('That screenshot is larger than 30 MB. Use a smaller image.');
       const url = await new Promise((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve(reader.result); reader.onerror = () => reject(new Error('Could not read the clipboard image.')); reader.readAsDataURL(file); });
       if (epoch !== draftEpoch) throw new Error('Conversation changed. Paste your screenshot again.');
       if (attachments.length >= 4) throw new Error('You can attach up to four screenshots per message.');

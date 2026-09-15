@@ -19,7 +19,7 @@ Completed tasks and requests for input show a toast while collapsed. Right-click
 
 ## Conversations and projects
 
-Paste screenshots into the message box with **Ctrl+V**. Review the thumbnails, remove any unwanted attachment, and send with or without text. Up to four PNG/JPEG/WebP/GIF images, each no larger than 5 MB, can be attached per message. Sent screenshots are saved with the local conversation and sent to Claude as image content.
+Paste screenshots into the message box with **Ctrl+V**. Review the thumbnails, remove any unwanted attachment, and send with or without text. Up to four PNG/JPEG/WebP/GIF images, each no larger than 30 MB, can be attached per message. Claude Code handles image preparation for its API limits. Sent screenshots are saved with the local conversation and sent to Claude as image content.
 
 **Settings → Load conversation** lists the 200 most recently used local Claude Code sessions, including desktop Code sessions visible to the SDK. Search by title or folder, then select a row to load its history and resume its original session in its original project folder. Finish any running turn in the desktop app before continuing the same session in ClaudeHUD.
 

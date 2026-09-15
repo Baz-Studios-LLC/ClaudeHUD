@@ -111,9 +111,10 @@ class ClaudeService {
     if (!this.session()) throw new Error('Choose your addon folder first.');
     if (typeof text !== 'string' || text.length > 12000 || !Array.isArray(images) || images.length > 4 || (!text.trim() && !images.length)) throw new Error('Add a message or up to four screenshots. Text is limited to 12,000 characters.');
     const validated = images.map(image => {
-      if (!image || !['image/png', 'image/jpeg', 'image/webp', 'image/gif'].includes(image.type) || typeof image.data !== 'string' || image.data.length > 7 * 1024 * 1024 || !/^[A-Za-z0-9+/]+={0,2}$/.test(image.data)) throw new Error('Unsupported image attachment. Paste PNG, JPEG, WebP, or GIF.');
+      if (!image || !['image/png', 'image/jpeg', 'image/webp', 'image/gif'].includes(image.type) || typeof image.data !== 'string' || image.data.length > 40 * 1024 * 1024 || !/^[A-Za-z0-9+/]+={0,2}$/.test(image.data)) throw new Error('Unsupported image attachment. Paste PNG, JPEG, WebP, or GIF (up to 30 MB each).');
       const bytes = Buffer.from(image.data, 'base64');
-      if (!bytes.length || bytes.length > 5 * 1024 * 1024) throw new Error('Each image must be 5 MB or smaller.');
+      // Claude Code prepares large images for the API; this is our input file limit.
+      if (!bytes.length || bytes.length > 30 * 1024 * 1024) throw new Error('Each image must be 30 MB or smaller.');
       const valid = image.type === 'image/png' ? bytes.subarray(0, 8).equals(Buffer.from([137,80,78,71,13,10,26,10])) : image.type === 'image/jpeg' ? bytes[0] === 255 && bytes[1] === 216 && bytes[2] === 255 : image.type === 'image/gif' ? /^GIF8[79]a/.test(bytes.toString('ascii', 0, 6)) : bytes.toString('ascii', 0, 4) === 'RIFF' && bytes.toString('ascii', 8, 12) === 'WEBP';
       if (!valid) throw new Error('The pasted image is not a valid supported image file.');
       return { type: image.type, data: image.data };
