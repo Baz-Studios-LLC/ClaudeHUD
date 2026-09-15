@@ -29,6 +29,8 @@ The permission selector beside the message box supports **Manual** (default: ask
 
 The orange icon uses the supplied `icon.png`, tinted at runtime. The same native window grows and shrinks around its anchored header. Drag the header to move it; resize from the edges when expanded. Dragging reserves room for the expanded panel within the monitor. Opacity and optional sound are in Settings; these overlay preferences currently reset on restart.
 
+Click outside the overlay to collapse it automatically. Its folder picker and New chat confirmation keep the panel open.
+
 The overlay uses an always-on-top Electron window without injecting into WoW. The collapsed window is only the size of its header and does not take keyboard focus. It also appears over other applications. In-game focus behavior still needs checking on your WoW setup.
 
 ## Verification

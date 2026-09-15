@@ -112,7 +112,7 @@ $('#toast').onclick = () => action('open');
 $('#settings-toggle').onclick = () => { $('#settings').hidden = !$('#settings').hidden; };
 $('#settings-close').onclick = () => { $('#settings').hidden = true; }; $('#quit').onclick = () => action('quit');
 $('#choose-project').onclick = () => claude('project'); $('#reconnect').onclick = () => { if (!busy) claude('connect'); };
-$('#new-chat').onclick = () => { if (window.confirm('Start a fresh conversation for this addon?')) claude('new-chat'); };
+$('#new-chat').onclick = () => claude('new-chat');
 $('#stop').onclick = () => claude('stop');
 $('#opacity').oninput = event => action('opacity', Number(event.target.value) / 100);
 $('#sound').onchange = () => { if ($('#sound').checked) { audio ||= new AudioContext(); audio.resume(); } };

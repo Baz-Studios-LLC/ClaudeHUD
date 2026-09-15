@@ -6,6 +6,7 @@ const fs = require('node:fs');
 let panel, toast, timer, tray;
 let claude;
 let updates;
+let nativeDialogOpen = false;
 let expanded = true;
 let expandedSize = { width: 460, height: 740 };
 let transitionTimer, finishTransition;
@@ -86,6 +87,10 @@ function setExpanded(next) {
 function openPanel() { return setExpanded(true); }
 function collapse() { return setExpanded(false); }
 function toggle() { return setExpanded(!expanded); }
+function collapseOnBlur() {
+  if (expanded && !nativeDialogOpen && !quitting) return collapse();
+  return Promise.resolve();
+}
 function createTrayIcon() {
   const size = 32;
   const pixels = nativeImage.createFromPath(path.join(__dirname, 'icon.png')).resize({ width: size, height: size }).toBitmap();
@@ -127,6 +132,9 @@ app.whenReady().then(async () => {
   expandedSize.height = Math.min(740, area.height - 40);
   panel = new BrowserWindow({ ...windowOptions(460, Math.min(740, area.height - 40)), minWidth: 380, minHeight: 520, x: area.x + area.width - 488, y: area.y + 20 });
   panel.setIcon(createTrayIcon());
+  panel.on('blur', () => {
+    if (!smoke) void collapseOnBlur();
+  });
   panel.on('resize', () => { if (expanded && !transitioning) { const bounds = panel.getBounds(); expandedSize = { width: bounds.width, height: bounds.height }; } });
   // Reserve room for the expanded panel when dragging its compact header.
   panel.on('will-move', (event, bounds) => {
@@ -188,6 +196,11 @@ app.whenReady().then(async () => {
       await panel.webContents.executeJavaScript(`document.querySelector('#overlay-toggle').click()`);
       await new Promise(resolve => setTimeout(resolve, 700));
       if (!expanded || JSON.stringify(panel.getBounds()) !== JSON.stringify(original)) throw new Error('Icon did not open chat');
+      nativeDialogOpen = true; await collapseOnBlur();
+      if (!expanded) throw new Error('Dialog incorrectly collapsed panel');
+      nativeDialogOpen = false; await collapseOnBlur();
+      if (expanded || panel.getBounds().height !== compactSize.height) throw new Error('Blur did not collapse panel');
+      await openPanel();
       fs.writeFileSync(path.join(__dirname, 'artifacts', 'smoke.json'), JSON.stringify({ passed: true, ...result }, null, 2));
       app.exit(0);
     } catch (error) { console.error(error); app.exit(1); }
@@ -220,13 +233,22 @@ ipcMain.handle('claude', async (event, action, value) => {
     if (action === 'connect') return await claude.connect();
     if (action === 'project') {
       if (claude.busy) throw new Error('Stop the current task before switching addons.');
-      const result = await dialog.showOpenDialog(panel, { title: 'Choose your WoW addon folder', properties: ['openDirectory'] });
-      if (!result.canceled) claude.selectProject(result.filePaths[0]);
+      nativeDialogOpen = true;
+      try {
+        const result = await dialog.showOpenDialog(panel, { title: 'Choose your WoW addon folder', properties: ['openDirectory'] });
+        if (!result.canceled) claude.selectProject(result.filePaths[0]);
+      } finally { nativeDialogOpen = false; panel.focus(); }
     }
     if (action === 'send') await claude.send(value);
     if (action === 'stop') claude.stop();
     if (action === 'respond') claude.respond(value);
-    if (action === 'new-chat') claude.newChat();
+    if (action === 'new-chat') {
+      nativeDialogOpen = true;
+      try {
+        const choice = await dialog.showMessageBox(panel, { type: 'question', message: 'Start a fresh conversation for this addon?', buttons: ['Cancel', 'New chat'], defaultId: 0, cancelId: 0 });
+        if (choice.response === 1) claude.newChat();
+      } finally { nativeDialogOpen = false; panel.focus(); }
+    }
     return { ok: true };
   } catch (error) { return { error: error.message }; }
 });
