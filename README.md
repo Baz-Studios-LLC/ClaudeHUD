@@ -4,6 +4,8 @@ A Windows overlay for working with Claude Code while playing World of Warcraft i
 
 ## Start
 
+For automatic updates, install the Windows `.exe` from [GitHub Releases](https://github.com/Baz-Studios-LLC/ClaudeHUD/releases/latest). Source launches with `npm start` do not update themselves.
+
 Install dependencies with `npm install`, then double-click `Start-ClaudeHUD.cmd` or run `npm start`.
 
 Claude Code must be installed and signed in (`claude auth login`). ClaudeHUD detects the native install at `%USERPROFILE%\.local\bin\claude.exe`, falling back to PATH. Credentials stay with Claude Code; the overlay does not copy them.
@@ -35,6 +37,14 @@ The overlay uses an always-on-top Electron window without injecting into WoW. Th
 - `npm test`: streaming, session restoration, approval/denial, questions, cancellation of approvals, error handling, and project-switch guards.
 - `npm run smoke`: UI checks for message/approval rendering, anchored animation, and click toggling; screenshots under `artifacts/`.
 - `node live-check.js`: sends real Claude requests, tests resumed conversation and approved/denied writes in `artifacts/connection-check`. Uses your Claude account usage.
+
+## Updates and releases
+
+Installed copies check GitHub Releases after startup and every four hours. Updates download automatically. **Settings → Restart to update** installs a downloaded update when Claude is idle; **Check for updates** is also available in the tray menu. Updates never install automatically on quit.
+
+Build a Windows installer locally with `npm run dist -- --publish never`. To release, bump the version in `package.json` and the lockfile, commit, and push a matching `vX.Y.Z` tag. The Windows release workflow tests and builds the installer, blockmap, and `latest.yml`, uploads them to a draft release, and then publishes it. The workflow uses GitHub's temporary Actions token, never a credential bundled in the app.
+
+Windows code signing is not configured yet; installers may show an unknown-publisher warning. Runtime files and account credentials are excluded from both Git and the packaged app.
 
 ## References
 

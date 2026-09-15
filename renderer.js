@@ -124,6 +124,13 @@ async function submit() {
 $('#composer').onsubmit = event => { event.preventDefault(); submit(); };
 $('#prompt').onkeydown = event => { if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) { event.preventDefault(); submit(); } };
 controls();
+bridge.onUpdate(value => {
+  $('#update-status').textContent = `ClaudeHUD ${value.version} · ${value.detail}`;
+  $('#install-update').hidden = value.phase !== 'ready';
+  $('#check-updates').disabled = ['development', 'checking', 'downloading'].includes(value.phase);
+});
+$('#check-updates').onclick = () => action('check-updates');
+$('#install-update').onclick = async () => { const result = await action('install-update'); if (result?.error) $('#update-status').textContent = result.error; };
 let conversations = [];
 function renderConversations() {
   const search = $('#conversation-search').value.toLowerCase();

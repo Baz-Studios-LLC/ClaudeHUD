@@ -6,6 +6,7 @@ contextBridge.exposeInMainWorld('hud', {
   onNotice: callback => ipcRenderer.on('notice', (_, value) => callback(value)),
   onDemo: callback => ipcRenderer.on('demo-mode', callback),
   onStatus: callback => ipcRenderer.on('status', (_, status) => callback(status)),
+  onUpdate: callback => ipcRenderer.on('update-status', (_, value) => callback(value)),
   onFocus: callback => ipcRenderer.on('focus-input', callback),
   onExpansion: callback => ipcRenderer.on('expansion', (_, value) => callback(value)),
   onSettings: callback => ipcRenderer.on('open-settings', callback),

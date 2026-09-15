@@ -1,9 +1,11 @@
 const { app, BrowserWindow, ipcMain, globalShortcut, screen, Tray, Menu, nativeImage, dialog } = require('electron');
 const { ClaudeService } = require('./claude-service');
+const { createUpdater } = require('./updater');
 const path = require('node:path');
 const fs = require('node:fs');
 let panel, toast, timer, tray;
 let claude;
+let updates;
 let expanded = true;
 let expandedSize = { width: 460, height: 740 };
 let transitionTimer, finishTransition;
@@ -101,6 +103,7 @@ function setupTray() {
     { label: 'Collapse to badge', click: collapse },
     { type: 'separator' },
     { label: 'Overlay settings', click: () => { openPanel(); panel.webContents.send('open-settings'); } },
+    { label: 'Check for updates', click: () => { openPanel(); panel.webContents.send('open-settings'); void updates?.check(); } },
     { type: 'separator' },
     { label: 'Quit ClaudeHUD', click: () => app.quit() }
   ]));
@@ -144,6 +147,11 @@ app.whenReady().then(async () => {
   const registered = globalShortcut.register(shortcut, toggle);
   panel.webContents.send('shortcut-status', registered);
   setupTray(); sendState(); panel.show();
+  updates = createUpdater({ app, updater: require('electron-updater').autoUpdater, isBusy: () => !!claude?.busy, emit: value => {
+    panel.webContents.send('update-status', value);
+    if (value.phase === 'ready') notify('ClaudeHUD update ready', 'Open Settings to restart and install.');
+  } });
+  updates.start();
   if (!smoke) {
     claude = new ClaudeService({ storage: path.join(app.getPath('userData'), 'conversations.json'), emit: claudeEvent });
     panel.webContents.send('claude-event', { type: 'snapshot', data: claude.snapshot() });
@@ -191,6 +199,8 @@ ipcMain.handle('action', (event, action, value) => {
   if (action === 'collapse') collapse();
   if (action === 'toggle') toggle();
   if (action === 'quit') app.quit();
+  if (action === 'check-updates') return updates?.check();
+  if (action === 'install-update') return updates?.install();
   if (action === 'opacity' && typeof value === 'number') panel.setOpacity(Math.max(.8, Math.min(1, value)));
   if (action === 'shortcut') return bindShortcut(value);
   if (action === 'status' && ['Ready', 'Working', 'Finished'].includes(value)) { state = value; sendState(); }
@@ -227,7 +237,7 @@ app.on('before-quit', event => {
     Promise.resolve(claude.running).finally(() => app.quit());
   }
 });
-app.on('will-quit', () => { globalShortcut.unregisterAll(); clearTimeout(timer); clearInterval(transitionTimer); });
+app.on('will-quit', () => { updates?.dispose(); globalShortcut.unregisterAll(); clearTimeout(timer); clearInterval(transitionTimer); });
 app.on('window-all-closed', () => app.quit());
 
 
