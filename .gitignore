@@ -1,0 +1,9 @@
+node_modules/
+.npm-cache/
+artifacts/
+*.log
+.env
+.env.*
+!.env.example
+conversations.json
+conversations.json.tmp
