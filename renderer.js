@@ -4,12 +4,16 @@ for (const name of ['panel', 'toast']) $(`#${name}`).hidden = name !== surface;
 const bridge = window.hud;
 const action = (name, value) => bridge.action(name, value);
 let busy = false, audio, project, connected = false;
+let permissionMode = 'default';
+const modeDescriptions = { default: 'Ask before changes and commands', auto: 'Claude handles permission decisions', acceptEdits: 'Automatically accept file edits', plan: 'Plan before making changes', bypassPermissions: 'Allow tools without permission prompts' };
 const messageNodes = new Map(), requests = new Map();
 const welcome = $('#messages').innerHTML;
 function scrollToBottom() { $('#messages').scrollTop = $('#messages').scrollHeight; }
 function controls() {
   $('#send').disabled = busy || !connected || !project;
   $('#stop').hidden = !busy; $('#choose-project').disabled = busy; $('#new-chat').disabled = busy; $('#conversations-open').disabled = busy;
+  $('#permission-mode').disabled = busy;
+  $('#permission-mode').title = busy ? 'Stop the current task to change mode' : modeDescriptions[permissionMode];
 }
 function message(item) {
   let body = messageNodes.get(item.id);
@@ -68,6 +72,7 @@ function permission(data) {
 bridge.onClaude(({ type, data }) => {
   if (type === 'snapshot') {
     project = data.project; connected = data.connection.ready; busy = data.busy;
+    permissionMode = data.permissionMode || 'default'; $('#permission-mode').value = permissionMode;
     $('#conversation-title').textContent = data.title || 'Addon conversation';
     $('#conversation-title').title = data.title || 'Addon conversation';
     $('#choose-project').textContent = project ? project.split(/[\\/]/).pop() + ' ▾' : 'Choose addon folder ▾';
@@ -124,6 +129,11 @@ async function submit() {
 $('#composer').onsubmit = event => { event.preventDefault(); submit(); };
 $('#prompt').onkeydown = event => { if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) { event.preventDefault(); submit(); } };
 controls();
+$('#permission-mode').onchange = async event => {
+  const result = await claude('permission-mode', event.target.value);
+  if (result) permissionMode = result.mode;
+  event.target.value = permissionMode; controls();
+};
 bridge.onUpdate(value => {
   $('#update-status').textContent = `ClaudeHUD ${value.version} · ${value.detail}`;
   $('#install-update').hidden = value.phase !== 'ready';

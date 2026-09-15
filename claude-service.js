@@ -13,7 +13,13 @@ class ClaudeService {
     try { if (fs.existsSync(storage)) this.data = JSON.parse(fs.readFileSync(storage, 'utf8')); } catch { this.connection.detail = 'Saved conversation could not be loaded.'; }
     if (!this.data.sessions || typeof this.data.sessions !== 'object') this.data = { project: null, sessions: {} };
   }
-  snapshot() { return { project: this.data.project, title: this.session()?.title, messages: this.session()?.messages || [], connection: this.connection, busy: this.busy }; }
+  snapshot() { return { permissionMode: this.data.permissionMode || 'default', project: this.data.project, title: this.session()?.title, messages: this.session()?.messages || [], connection: this.connection, busy: this.busy }; }
+  setPermissionMode(mode) {
+    if (this.busy) throw new Error('Stop the current task before changing permission mode.');
+    if (!['default', 'auto', 'acceptEdits', 'plan', 'bypassPermissions'].includes(mode)) throw new Error('Unknown permission mode.');
+    this.data.permissionMode = mode; this.save();
+    return { mode };
+  }
   async listConversations() {
     const { listSessions } = await import('@anthropic-ai/claude-agent-sdk');
     const sessions = await listSessions({ limit: 200 });
@@ -111,11 +117,13 @@ class ClaudeService {
       const options = {
         cwd: this.data.project, pathToClaudeCodeExecutable: this.executable,
         abortController: this.controller, includePartialMessages: true,
-        permissionMode: 'default', settingSources: ['project'], strictMcpConfig: true, mcpServers: {},
-        tools: ['Read', 'Glob', 'Grep', 'Edit', 'Write', 'Bash', 'AskUserQuestion'],
+        permissionMode: this.data.permissionMode || 'default',
+        allowDangerouslySkipPermissions: this.data.permissionMode === 'bypassPermissions',
+        settingSources: ['project'], strictMcpConfig: true, mcpServers: {},
+        tools: ['Read', 'Glob', 'Grep', 'Edit', 'Write', 'Bash', 'AskUserQuestion', 'ExitPlanMode'],
         systemPrompt: { type: 'preset', preset: 'claude_code', append: 'You are working through ClaudeHUD, a compact overlay used while playing World of Warcraft. Help develop addons in the selected workspace. Keep progress updates concise. Summarize changed files and any required in-game /reload at completion.' },
         canUseTool: this.permission.bind(this),
-        hooks: { PreToolUse: [{ hooks: [async input => ['Write', 'Edit', 'Bash'].includes(input.tool_name) ? { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'ask', permissionDecisionReason: 'Confirm this action in ClaudeHUD.' } } : {}] }] },
+        hooks: { PreToolUse: [{ hooks: [async input => (this.data.permissionMode || 'default') === 'default' && ['Write', 'Edit', 'Bash'].includes(input.tool_name) ? { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'ask', permissionDecisionReason: 'Confirm this action in ClaudeHUD.' } } : {}] }] },
         spawnClaudeCodeProcess: opts => spawn(opts.command, opts.args, { cwd: opts.cwd, env: opts.env, signal: opts.signal, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] })
       };
       if (this.session().sessionId) options.resume = this.session().sessionId;

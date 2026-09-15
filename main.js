@@ -214,6 +214,7 @@ ipcMain.handle('claude', async (event, action, value) => {
   if (event.sender !== panel?.webContents || !claude) return { error: 'Claude is not available.' };
   try {
     if (action === 'snapshot') return claude.snapshot();
+    if (action === 'permission-mode') return claude.setPermissionMode(value);
     if (action === 'list-conversations') return { conversations: await claude.listConversations() };
     if (action === 'load-conversation') await claude.loadConversation(value);
     if (action === 'connect') return await claude.connect();

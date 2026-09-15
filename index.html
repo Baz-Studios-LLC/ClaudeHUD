@@ -13,11 +13,12 @@
     <div class="date-divider"><span>YOUR ADDON WORKSHOP</span></div>
   </section>
   <div class="activity"><span class="status-dot"></span><span id="status-label">Ready when you are</span><span class="local-label">CLAUDE CODE</span></div>
-  <form id="composer" class="composer"><textarea id="prompt" rows="2" placeholder="Ask Claude about your addon…" aria-label="Message Claude" maxlength="12000"></textarea><div class="composer-tools"><span>✧ <span>Addon workspace</span></span><button id="stop" type="button" class="quiet" hidden>Stop</button><button id="send" type="submit" aria-label="Send message" title="Send message"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M12 19V5M5.5 11.5 12 5l6.5 6.5"/></svg></button></div></form>
+  <form id="composer" class="composer"><textarea id="prompt" rows="2" placeholder="Ask Claude about your addon…" aria-label="Message Claude" maxlength="12000"></textarea><div class="composer-tools"><select id="permission-mode" aria-label="Permission mode"><option value="auto">Auto</option><option value="default" selected>Manual</option><option value="acceptEdits">Accept edits</option><option value="plan">Plan</option><option value="bypassPermissions">Bypass permissions</option></select><button id="stop" type="button" class="quiet" hidden>Stop</button><button id="send" type="submit" aria-label="Send message" title="Send message"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M12 19V5M5.5 11.5 12 5l6.5 6.5"/></svg></button></div></form>
   <footer><span><kbd id="shortcut-hint">Ctrl Shift Space</kbd> to toggle</span><span><kbd>Esc</kbd> back to game</span></footer>
 </main>
 <button id="toast" class="toast" hidden><span class="toast-icon">✓</span><span><strong>Claude finished</strong><small>Open chat to take a look.</small></span><span>↗</span></button>
 <script src="renderer.js"></script></body></html>
+
 
 
 

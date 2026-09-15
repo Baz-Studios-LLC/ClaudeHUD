@@ -23,7 +23,7 @@ Completed tasks and requests for input show a toast while collapsed. Right-click
 
 Each selected folder has its own Claude session and conversation. These are saved locally in `%APPDATA%\claudehud\conversations.json`; Claude Code stores its own session data as well. Switching folders resumes that folder's conversation. **Settings → New chat** starts fresh for the selected addon and clears its displayed history. **Reconnect Claude** checks your CLI login again.
 
-Claude can read files in the selected workspace. File writes, edits, and shell commands require approval through the overlay. Existing project instructions are loaded. Unrelated MCP connectors are disabled in this initial integration. No permissions are bypassed. Stopping or quitting does not undo changes already made.
+The permission selector beside the message box supports **Manual** (default: asks before changes and commands), **Auto** (Claude makes permission decisions), **Accept edits** (automatically approves file edits), **Plan** (plans before changes), and **Bypass permissions** (runs tools without approval prompts). Your selection is saved and applies to subsequent tasks. Stop an active task before changing modes. Auto availability depends on your Claude Code account/model configuration; any SDK error appears in chat. Existing project instructions are loaded. Unrelated MCP connectors are disabled in this initial integration. Stopping or quitting does not undo changes already made.
 
 ## Overlay
 

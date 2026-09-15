@@ -49,3 +49,21 @@ test('busy tasks cannot switch folders and failures become visible', async () =>
   await service.send('Hi'); assert.throws(() => service.selectProject(root)); await idle(service);
   assert.ok(events.some(e => e.type === 'failure' && e.data.text.includes('Connection lost')));
 });
+test('permission modes persist and only Manual forces approvals', async () => {
+  for (const mode of ['default', 'auto', 'acceptEdits', 'plan', 'bypassPermissions']) {
+    let options;
+    const { service, root } = fixture(args => {
+      options = args.options;
+      return (async function* () { yield { type: 'result', subtype: 'success', result: 'OK' }; })();
+    });
+    service.setPermissionMode(mode); await service.send('Test'); await idle(service);
+    assert.equal(options.permissionMode, mode);
+    assert.equal(options.allowDangerouslySkipPermissions, mode === 'bypassPermissions');
+    const hook = await options.hooks.PreToolUse[0].hooks[0]({ tool_name: 'Write' });
+    assert.equal(hook.hookSpecificOutput?.permissionDecision, mode === 'default' ? 'ask' : undefined);
+    const restored = new ClaudeService({ storage: path.join(root, 'state.json'), emit() {} });
+    assert.equal(restored.snapshot().permissionMode, mode);
+    service.busy = true; assert.throws(() => service.setPermissionMode('default'));
+    service.busy = false; assert.throws(() => service.setPermissionMode('invalid'));
+  }
+});
