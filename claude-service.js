@@ -4,6 +4,7 @@ const os = require('node:os');
 const { randomUUID } = require('node:crypto');
 const { spawn, execFile } = require('node:child_process');
 const { promisify } = require('node:util');
+const { latestContext, withContextLimit } = require('./context-usage');
 
 class ClaudeService {
   constructor({ storage, emit, queryFactory }) {
@@ -13,7 +14,7 @@ class ClaudeService {
     try { if (fs.existsSync(storage)) this.data = JSON.parse(fs.readFileSync(storage, 'utf8')); } catch { this.connection.detail = 'Saved conversation could not be loaded.'; }
     if (!this.data.sessions || typeof this.data.sessions !== 'object') this.data = { project: null, sessions: {} };
   }
-  snapshot() { return { permissionMode: this.data.permissionMode || 'default', project: this.data.project, title: this.session()?.title, messages: this.session()?.messages || [], connection: this.connection, busy: this.busy }; }
+  snapshot() { return { context: this.session()?.context || null, permissionMode: this.data.permissionMode || 'default', project: this.data.project, title: this.session()?.title, messages: this.session()?.messages || [], connection: this.connection, busy: this.busy }; }
   setPermissionMode(mode) {
     if (this.busy) throw new Error('Stop the current task before changing permission mode.');
     if (!['default', 'auto', 'acceptEdits', 'plan', 'bypassPermissions'].includes(mode)) throw new Error('Unknown permission mode.');
@@ -35,12 +36,15 @@ class ClaudeService {
     const messages = history.filter(item => !item.parent_tool_use_id && ['user', 'assistant'].includes(item.type)).flatMap(item => {
       const content = item.message?.content;
       const text = typeof content === 'string' ? content : Array.isArray(content) ? content.filter(block => block.type === 'text').map(block => block.text).join('\n') : '';
-      return text ? [{ id: item.uuid, role: item.type === 'user' ? 'You' : 'Claude', text, time: null }] : [];
+      const images = Array.isArray(content) ? content.filter(block => block.type === 'image' && block.source?.type === 'base64' && ['image/png', 'image/jpeg', 'image/webp', 'image/gif'].includes(block.source.media_type)).map(block => ({ type: block.source.media_type, data: block.source.data })) : [];
+      return text || images.length ? [{ id: item.uuid, role: item.type === 'user' ? 'You' : 'Claude', text, images, time: null }] : [];
     });
     if (this.busy) throw new Error('Stop the current task before loading a conversation.');
     const project = fs.realpathSync(info.cwd);
     this.data.project = project;
-    this.data.sessions[project] = { sessionId: id, title: info.customTitle || info.summary, messages };
+    let context = this.data.sessions[project]?.sessionId === id ? this.data.sessions[project].context : null;
+    for (const item of history) if (item.type === 'assistant' && !item.parent_tool_use_id) context = latestContext(item.message, context);
+    this.data.sessions[project] = { sessionId: id, title: info.customTitle || info.summary, messages, context };
     this.save(); this.emit('snapshot', this.snapshot());
   }
   session() { return this.data.sessions[this.data.project]; }
@@ -72,8 +76,8 @@ class ClaudeService {
     this.data.sessions[this.data.project] = { messages: [], sessionId: null };
     this.save(); this.emit('snapshot', this.snapshot());
   }
-  add(role, text, id = randomUUID()) {
-    const item = { id, role, text, time: Date.now() };
+  add(role, text, id = randomUUID(), images = []) {
+    const item = { id, role, text, time: Date.now(), ...(images.length ? { images } : {}) };
     this.session().messages.push(item); this.emit('message', item); return item;
   }
   async permission(tool, input, { signal }) {
@@ -99,16 +103,29 @@ class ClaudeService {
     for (const request of [...this.pending.values()]) request.finish({ behavior: 'deny', message: 'Task stopped by user.' });
     this.controller?.abort();
   }
-  async send(text) {
+  async send(payload) {
+    const text = typeof payload === 'string' ? payload : payload?.text;
+    const images = typeof payload === 'string' ? [] : payload?.images || [];
     if (this.busy) throw new Error('Claude is already working.');
     if (!this.connection.ready) throw new Error(this.connection.detail);
     if (!this.session()) throw new Error('Choose your addon folder first.');
-    if (typeof text !== 'string' || !text.trim() || text.length > 12000) throw new Error('Enter a message up to 12,000 characters.');
+    if (typeof text !== 'string' || text.length > 12000 || !Array.isArray(images) || images.length > 4 || (!text.trim() && !images.length)) throw new Error('Add a message or up to four screenshots. Text is limited to 12,000 characters.');
+    const validated = images.map(image => {
+      if (!image || !['image/png', 'image/jpeg', 'image/webp', 'image/gif'].includes(image.type) || typeof image.data !== 'string' || image.data.length > 7 * 1024 * 1024 || !/^[A-Za-z0-9+/]+={0,2}$/.test(image.data)) throw new Error('Unsupported image attachment. Paste PNG, JPEG, WebP, or GIF.');
+      const bytes = Buffer.from(image.data, 'base64');
+      if (!bytes.length || bytes.length > 5 * 1024 * 1024) throw new Error('Each image must be 5 MB or smaller.');
+      const valid = image.type === 'image/png' ? bytes.subarray(0, 8).equals(Buffer.from([137,80,78,71,13,10,26,10])) : image.type === 'image/jpeg' ? bytes[0] === 255 && bytes[1] === 216 && bytes[2] === 255 : image.type === 'image/gif' ? /^GIF8[79]a/.test(bytes.toString('ascii', 0, 6)) : bytes.toString('ascii', 0, 4) === 'RIFF' && bytes.toString('ascii', 8, 12) === 'WEBP';
+      if (!valid) throw new Error('The pasted image is not a valid supported image file.');
+      return { type: image.type, data: image.data };
+    });
     this.busy = true; this.controller = new AbortController();
-    this.add('You', text.trim());
+    this.add('You', text.trim(), randomUUID(), validated);
     try { this.save(); } catch (error) { this.busy = false; this.controller = null; throw error; }
     this.emit('busy', true);
-    this.running = this.run(text.trim());
+    const content = validated.map(image => ({ type: 'image', source: { type: 'base64', media_type: image.type, data: image.data } }));
+    if (text.trim()) content.push({ type: 'text', text: text.trim() });
+    const prompt = validated.length ? (async function* () { yield { type: 'user', message: { role: 'user', content }, parent_tool_use_id: null, session_id: '' }; })() : text.trim();
+    this.running = this.run(prompt);
   }
   async run(prompt) {
     let stream, current, finalReceived = false;
@@ -130,6 +147,9 @@ class ClaudeService {
       stream = query({ prompt, options });
       for await (const event of stream) {
         if (event.session_id) this.session().sessionId = event.session_id;
+        if (event.type === 'system' && event.subtype === 'compact_boundary') {
+          this.session().context = null; this.emit('context', null);
+        }
         if (event.type === 'stream_event') {
           const part = event.event;
           if (part.type === 'message_start') current = null;
@@ -139,12 +159,18 @@ class ClaudeService {
           }
         }
         if (event.type === 'assistant') {
+          if (!event.parent_tool_use_id) {
+            this.session().context = latestContext(event.message, this.session().context);
+            this.emit('context', this.session().context);
+          }
           const text = event.message.content.filter(x => x.type === 'text').map(x => x.text).join('\n');
           if (text) { if (current) { current.text = text; this.emit('message', { ...current }); } else this.add('Claude', text); }
           current = null;
           for (const block of event.message.content) if (block.type === 'tool_use') this.emit('activity', `${block.name}${block.input?.file_path ? ': ' + path.basename(block.input.file_path) : ''}`);
         }
         if (event.type === 'result') {
+          this.session().context = withContextLimit(this.session().context, event.modelUsage);
+          this.emit('context', this.session().context);
           finalReceived = true;
           if (event.is_error || event.subtype !== 'success') throw new Error(event.errors?.join('\n') || event.result || 'Claude could not finish this task.');
           this.emit('complete', { text: event.result || 'Claude finished.' });

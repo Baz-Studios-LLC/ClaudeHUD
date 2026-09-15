@@ -19,15 +19,19 @@ Completed tasks and requests for input show a toast while collapsed. Right-click
 
 ## Conversations and projects
 
-**Load conversation** lists the 200 most recently used local Claude Code sessions, including desktop Code sessions visible to the SDK. Search by title or folder, then select a row to load its history and resume its original session in its original project folder. Finish any running turn in the desktop app before continuing the same session in ClaudeHUD.
+Paste screenshots into the message box with **Ctrl+V**. Review the thumbnails, remove any unwanted attachment, and send with or without text. Up to four PNG/JPEG/WebP/GIF images, each no larger than 5 MB, can be attached per message. Sent screenshots are saved with the local conversation and sent to Claude as image content.
+
+**Settings → Load conversation** lists the 200 most recently used local Claude Code sessions, including desktop Code sessions visible to the SDK. Search by title or folder, then select a row to load its history and resume its original session in its original project folder. Finish any running turn in the desktop app before continuing the same session in ClaudeHUD.
 
 Each selected folder has its own Claude session and conversation. These are saved locally in `%APPDATA%\claudehud\conversations.json`; Claude Code stores its own session data as well. Switching folders resumes that folder's conversation. **Settings → New chat** starts fresh for the selected addon and clears its displayed history. **Reconnect Claude** checks your CLI login again.
 
-The permission selector beside the message box supports **Manual** (default: asks before changes and commands), **Auto** (Claude makes permission decisions), **Accept edits** (automatically approves file edits), **Plan** (plans before changes), and **Bypass permissions** (runs tools without approval prompts). Your selection is saved and applies to subsequent tasks. Stop an active task before changing modes. Auto availability depends on your Claude Code account/model configuration; any SDK error appears in chat. Existing project instructions are loaded. Unrelated MCP connectors are disabled in this initial integration. Stopping or quitting does not undo changes already made.
+The permission selector in Settings supports **Manual** (default: asks before changes and commands), **Auto** (Claude makes permission decisions), **Accept edits** (automatically approves file edits), **Plan** (plans before changes), and **Bypass permissions** (runs tools without approval prompts). Your selection is saved and applies to subsequent tasks. Stop an active task before changing modes. Auto availability depends on your Claude Code account/model configuration; any SDK error appears in chat. Existing project instructions are loaded. Unrelated MCP connectors are disabled in this initial integration. Stopping or quitting does not undo changes already made.
 
 ## Overlay
 
-The orange icon uses the supplied `icon.png`, tinted at runtime. The same native window grows and shrinks around its anchored header. Drag the header to move it; resize from the edges when expanded. Dragging reserves room for the expanded panel within the monitor. Opacity and optional sound are in Settings; these overlay preferences currently reset on restart.
+The context bar below the composer shows the latest request's input tokens (including cache reads and writes) against the SDK-reported model context window. It updates after Claude responses and survives restarts. Imported sessions may show tokens with a pending limit until the next response. It is not cumulative billing usage; compaction can reduce it.
+
+The orange icon uses the supplied `icon.png`, tinted at runtime. The same native window grows and shrinks around its anchored header. Drag the header to move it; resize from the edges when expanded. Dragging reserves room for the expanded panel within the monitor. Settings persist locally in preferences.json in the app data folder: opacity, sound, hotkey, position, expanded size, open/collapsed state, and Settings/chat view. The selected addon, conversation, and permission mode also restore on launch. Off-screen positions are moved back onto an available monitor.
 
 Click outside the overlay to collapse it automatically. Its folder picker and New chat confirmation keep the panel open.
 

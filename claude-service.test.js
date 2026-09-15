@@ -67,3 +67,19 @@ test('permission modes persist and only Manual forces approvals', async () => {
     service.busy = false; assert.throws(() => service.setPermissionMode('invalid'));
   }
 });
+test('screenshots are sent as image blocks and saved even without text', async () => {
+  const image = { type: 'image/png', data: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aWQAAAABJRU5ErkJggg==' };
+  let received;
+  const { service, root } = fixture(({ prompt }) => (async function* () {
+    for await (const item of prompt) received = item;
+    yield { type: 'result', subtype: 'success', result: 'Image received' };
+  })());
+  await service.send({ text: '', images: [image] }); await idle(service);
+  assert.equal(received.message.content[0].type, 'image');
+  assert.deepEqual(received.message.content[0].source, { type: 'base64', media_type: image.type, data: image.data });
+  const restored = new ClaudeService({ storage: path.join(root, 'state.json'), emit() {} });
+  assert.deepEqual(restored.session().messages[0].images, [image]);
+  await assert.rejects(service.send({ text: 'bad', images: [{ type: 'image/png', data: 'bm90IGFuIGltYWdl' }] }));
+  await assert.rejects(service.send({ text: '', images: Array(5).fill(image) }));
+  assert.equal(service.busy, false);
+});

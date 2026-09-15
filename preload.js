@@ -10,5 +10,6 @@ contextBridge.exposeInMainWorld('hud', {
   onFocus: callback => ipcRenderer.on('focus-input', callback),
   onExpansion: callback => ipcRenderer.on('expansion', (_, value) => callback(value)),
   onSettings: callback => ipcRenderer.on('open-settings', callback),
+  onPreferences: callback => ipcRenderer.on('preferences', (_, value) => callback(value)),
   onShortcut: callback => ipcRenderer.on('shortcut-status', (_, value) => callback(value))
 });

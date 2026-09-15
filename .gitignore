@@ -8,3 +8,5 @@ dist/
 !.env.example
 conversations.json
 conversations.json.tmp
+preferences.json
+preferences.json.tmp

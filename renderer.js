@@ -5,12 +5,24 @@ const bridge = window.hud;
 const action = (name, value) => bridge.action(name, value);
 let busy = false, audio, project, connected = false;
 let permissionMode = 'default';
+let attachments = [], pasting = 0, draftEpoch = 0;
 const modeDescriptions = { default: 'Ask before changes and commands', auto: 'Claude handles permission decisions', acceptEdits: 'Automatically accept file edits', plan: 'Plan before making changes', bypassPermissions: 'Allow tools without permission prompts' };
 const messageNodes = new Map(), requests = new Map();
 const welcome = $('#messages').innerHTML;
 function scrollToBottom() { $('#messages').scrollTop = $('#messages').scrollHeight; }
+function contextUsage(context) {
+  const known = context && Number.isFinite(context.used);
+  const hasLimit = known && Number.isFinite(context.limit) && context.limit > 0;
+  const percent = hasLimit ? context.used / context.limit * 100 : 0;
+  const format = number => new Intl.NumberFormat(undefined, { notation: 'compact', maximumFractionDigits: 1 }).format(number);
+  $('#context-label').textContent = hasLimit ? `${format(context.used)} / ${format(context.limit)} · ${Math.round(percent)}%` : known ? `${format(context.used)} tokens · limit pending` : 'Available after a response';
+  $('#context-meter').hidden = !hasLimit;
+  $('#context-meter').value = Math.min(100, percent);
+  $('#context-meter').setAttribute('aria-valuetext', hasLimit ? `${context.used.toLocaleString()} of ${context.limit.toLocaleString()} tokens` : 'Context limit unavailable');
+  $('#context-usage').classList.toggle('context-high', percent >= 80);
+}
 function controls() {
-  $('#send').disabled = busy || !connected || !project;
+  $('#send').disabled = busy || pasting > 0 || !connected || !project;
   $('#stop').hidden = !busy; $('#choose-project').disabled = busy; $('#new-chat').disabled = busy; $('#conversations-open').disabled = busy;
   $('#permission-mode').disabled = busy;
   $('#permission-mode').title = busy ? 'Stop the current task to change mode' : modeDescriptions[permissionMode];
@@ -27,6 +39,13 @@ function message(item) {
     const time = document.createElement('time'); time.textContent = item.time ? new Date(item.time).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : '';
     meta.append(strong, time); const p = document.createElement('p'); p.className = 'response-text';
     body.append(meta, p); article.append(avatar, body); $('#messages').append(article); messageNodes.set(item.id, body);
+    if (item.images?.length) {
+      const images = document.createElement('div'); images.className = 'message-images';
+      for (const attachment of item.images) {
+        const image = document.createElement('img'); image.src = `data:${attachment.type};base64,${attachment.data}`; image.alt = 'Attached screenshot'; image.loading = 'lazy'; images.append(image);
+      }
+      body.append(images);
+    }
   }
   body.querySelector('.response-text').textContent = item.text;
   if (nearBottom || item.role === 'You') scrollToBottom();
@@ -71,7 +90,9 @@ function permission(data) {
 }
 bridge.onClaude(({ type, data }) => {
   if (type === 'snapshot') {
+    draftEpoch++; attachments = []; renderAttachments();
     project = data.project; connected = data.connection.ready; busy = data.busy;
+    contextUsage(data.context);
     permissionMode = data.permissionMode || 'default'; $('#permission-mode').value = permissionMode;
     $('#conversation-title').textContent = data.title || 'Addon conversation';
     $('#conversation-title').title = data.title || 'Addon conversation';
@@ -84,6 +105,7 @@ bridge.onClaude(({ type, data }) => {
     for (const item of data.messages) message(item); scrollToBottom(); controls();
   }
   if (type === 'message') message(data);
+  if (type === 'context') contextUsage(data);
   if (type === 'busy') { busy = data; controls(); }
   if (type === 'activity') $('#status-label').textContent = data;
   if (type === 'permission') permission(data);
@@ -98,34 +120,76 @@ bridge.onStatus(status => {
   $('#status-label').textContent = status === 'Ready' ? 'Ready when you are' : status === 'Working' ? 'Claude is working…' : status;
   $('#badge-status').textContent = status; document.body.classList.toggle('working', status === 'Working');
 });
-bridge.onFocus(() => $('#prompt').focus());
+function showSettings(open, persist = true) {
+  $('#settings').hidden = !open;
+  document.body.classList.toggle('settings-open', open);
+  $('#settings-toggle').setAttribute('aria-expanded', String(open));
+  if (persist) action('settings-view', open);
+  (open ? $('#settings-close') : $('#prompt')).focus();
+}
+bridge.onFocus(() => ($('#settings').hidden ? $('#prompt') : $('#settings-close')).focus());
 bridge.onExpansion(({ expanded, transitioning }) => {
   document.body.classList.toggle('collapsed', !expanded); document.body.classList.toggle('transitioning', transitioning);
   $('#overlay-toggle').setAttribute('aria-expanded', String(expanded));
   $('#overlay-toggle').setAttribute('aria-label', expanded ? 'Collapse chat' : 'Open chat'); $('#overlay-toggle').title = expanded ? 'Collapse chat' : 'Open chat';
   for (const child of $('#panel').children) if (child.tagName !== 'HEADER') child.inert = !expanded;
 });
-bridge.onSettings(() => { $('#settings').hidden = false; });
+bridge.onSettings(() => showSettings(true));
+bridge.onPreferences(value => {
+  $('#opacity').value = Math.round(value.opacity * 100); $('#sound').checked = value.sound;
+  $('#shortcut').value = value.shortcut; $('#shortcut-hint').textContent = $('#shortcut').selectedOptions[0].textContent;
+  showSettings(value.settingsOpen, false);
+});
 bridge.onShortcut(ok => { if (!ok) $('#settings-note').textContent = 'Hotkey unavailable. Choose another shortcut in settings.'; });
 $('#close-app').onclick = () => action('quit'); $('#overlay-toggle').onclick = () => action('toggle');
 $('#toast').onclick = () => action('open');
-$('#settings-toggle').onclick = () => { $('#settings').hidden = !$('#settings').hidden; };
-$('#settings-close').onclick = () => { $('#settings').hidden = true; }; $('#quit').onclick = () => action('quit');
+$('#settings-toggle').onclick = () => showSettings($('#settings').hidden);
+$('#settings-close').onclick = () => showSettings(false); $('#quit').onclick = () => action('quit');
 $('#choose-project').onclick = () => claude('project'); $('#reconnect').onclick = () => { if (!busy) claude('connect'); };
 $('#new-chat').onclick = () => claude('new-chat');
 $('#stop').onclick = () => claude('stop');
 $('#opacity').oninput = event => action('opacity', Number(event.target.value) / 100);
-$('#sound').onchange = () => { if ($('#sound').checked) { audio ||= new AudioContext(); audio.resume(); } };
+$('#sound').onchange = () => { action('sound', $('#sound').checked); if ($('#sound').checked) { audio ||= new AudioContext(); audio.resume(); } };
+document.addEventListener('pointerdown', () => { if ($('#sound').checked) { audio ||= new AudioContext(); audio.resume(); } });
 $('#shortcut').onchange = async event => {
   const ok = await action('shortcut', event.target.value); $('#settings-note').textContent = ok ? 'Shortcut updated.' : 'That shortcut is unavailable. Try another.';
   if (ok) $('#shortcut-hint').textContent = event.target.selectedOptions[0].textContent;
 };
-document.addEventListener('keydown', event => { if (event.key === 'Escape') { if (!$('#settings').hidden) $('#settings').hidden = true; else action('collapse'); } });
+document.addEventListener('keydown', event => { if (event.key === 'Escape') { if (!$('#settings').hidden) showSettings(false); else action('collapse'); } });
 async function submit() {
-  const text = $('#prompt').value.trim(); if (!text || busy) return;
-  busy = true; controls(); const result = await claude('send', text);
-  if (result) $('#prompt').value = ''; else { busy = false; controls(); }
+  const text = $('#prompt').value.trim(); if ((!text && !attachments.length) || busy || pasting) return;
+  const sent = [...attachments];
+  busy = true; controls(); const result = await claude('send', { text, images: sent.map(({ type, data }) => ({ type, data })) });
+  if (result) { $('#prompt').value = ''; attachments = attachments.filter(item => !sent.includes(item)); renderAttachments(); } else { busy = false; controls(); }
 }
+function renderAttachments() {
+  $('#attachments').replaceChildren(); $('#attachments').hidden = !attachments.length;
+  for (const attachment of attachments) {
+    const preview = document.createElement('div'); preview.className = 'attachment';
+    const image = document.createElement('img'); image.src = `data:${attachment.type};base64,${attachment.data}`; image.alt = 'Screenshot ready to send';
+    const remove = document.createElement('button'); remove.type = 'button'; remove.textContent = '×'; remove.setAttribute('aria-label', 'Remove screenshot');
+    remove.onclick = () => { attachments = attachments.filter(item => item !== attachment); renderAttachments(); };
+    preview.append(image, remove); $('#attachments').append(preview);
+  }
+}
+$('#prompt').addEventListener('paste', async event => {
+  const files = [...(event.clipboardData?.items || [])].filter(item => item.kind === 'file' && item.type.startsWith('image/')).map(item => item.getAsFile()).filter(Boolean);
+  if (!files.length) return;
+  event.preventDefault(); pasting++; controls();
+  const epoch = draftEpoch;
+  try {
+    for (const file of files) {
+      if (attachments.length >= 4) throw new Error('You can attach up to four screenshots per message.');
+      if (!['image/png', 'image/jpeg', 'image/webp', 'image/gif'].includes(file.type)) throw new Error('Paste a PNG, JPEG, WebP, or GIF image.');
+      if (file.size > 5 * 1024 * 1024) throw new Error('That screenshot is larger than 5 MB. Crop it or use a smaller image.');
+      const url = await new Promise((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve(reader.result); reader.onerror = () => reject(new Error('Could not read the clipboard image.')); reader.readAsDataURL(file); });
+      if (epoch !== draftEpoch) throw new Error('Conversation changed. Paste your screenshot again.');
+      if (attachments.length >= 4) throw new Error('You can attach up to four screenshots per message.');
+      attachments.push({ type: file.type, data: url.split(',')[1] }); renderAttachments();
+    }
+  } catch (error) { localError(error.message); }
+  finally { pasting--; controls(); }
+});
 $('#composer').onsubmit = event => { event.preventDefault(); submit(); };
 $('#prompt').onkeydown = event => { if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) { event.preventDefault(); submit(); } };
 controls();
@@ -156,7 +220,7 @@ function renderConversations() {
       for (const row of $('#conversation-list').children) row.disabled = true;
       $('#conversation-note').textContent = 'Loading conversation…';
       const result = await claude('load-conversation', item.id);
-      if (result) $('#conversation-picker').hidden = true;
+      if (result) { $('#conversation-picker').hidden = true; showSettings(false); }
       else { $('#conversation-note').textContent = 'Could not load. See the error in chat.'; renderConversations(); }
     };
     $('#conversation-list').append(button);

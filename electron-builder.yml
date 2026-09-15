@@ -7,6 +7,8 @@ files:
   - preload.js
   - renderer.js
   - claude-service.js
+  - context-usage.js
+  - preferences.js
   - updater.js
   - index.html
   - style.css

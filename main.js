@@ -1,11 +1,19 @@
 const { app, BrowserWindow, ipcMain, globalShortcut, screen, Tray, Menu, nativeImage, dialog } = require('electron');
 const { ClaudeService } = require('./claude-service');
 const { createUpdater } = require('./updater');
+const { Preferences, fitBounds } = require('./preferences');
 const path = require('node:path');
 const fs = require('node:fs');
 let panel, toast, timer, tray;
 let claude;
 let updates;
+let preferences, savePositionTimer;
+function saveWindow() {
+  if (smoke || !preferences || !panel || panel.isDestroyed()) return;
+  const bounds = panel.getBounds();
+  preferences.update({ expanded, bounds: { x: bounds.x, y: bounds.y, ...expandedSize } });
+}
+function scheduleSaveWindow() { if (transitioning) return; clearTimeout(savePositionTimer); savePositionTimer = setTimeout(saveWindow, 200); }
 let nativeDialogOpen = false;
 let expanded = true;
 let expandedSize = { width: 460, height: 740 };
@@ -17,6 +25,9 @@ let shortcut = 'CommandOrControl+Shift+Space';
 let state = 'Ready';
 const smoke = process.argv.includes('--smoke-test');
 if (smoke) app.setPath('userData', path.join(__dirname, 'artifacts', 'smoke-profile'));
+const ownsInstance = smoke || app.requestSingleInstanceLock();
+if (!ownsInstance) app.quit();
+app.on('second-instance', () => { if (panel && !panel.isDestroyed()) void openPanel(); });
 function windowOptions(width, height) {
   return { width, height, frame: false, transparent: true, backgroundColor: '#00000000', alwaysOnTop: true,
     show: false, skipTaskbar: true, webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false, sandbox: true } };
@@ -77,6 +88,7 @@ function setExpanded(next) {
         panel.setResizable(next);
         if (next) panel.setMinimumSize(380, 520);
         transitioning = false;
+        saveWindow();
         panel.webContents.send('expansion', { expanded: next, transitioning: false });
         if (next) { panel.focus(); panel.webContents.send('focus-input'); }
         resolve();
@@ -118,9 +130,12 @@ function bindShortcut(value) {
   if (!['CommandOrControl+Shift+Space', 'Alt+Shift+C', 'CommandOrControl+Shift+H'].includes(value)) return false;
   if (value === shortcut && globalShortcut.isRegistered(value)) return true;
   if (!globalShortcut.register(value, toggle)) return false;
-  globalShortcut.unregister(shortcut); shortcut = value; return true;
+  globalShortcut.unregister(shortcut); shortcut = value;
+  if (!smoke) preferences.update({ shortcut });
+  return true;
 }
 app.whenReady().then(async () => {
+  if (!ownsInstance) return;
   if (!smoke) {
     const previous = path.join(app.getPath('appData'), 'claudhud', 'conversations.json');
     const current = path.join(app.getPath('userData'), 'conversations.json');
@@ -128,14 +143,20 @@ app.whenReady().then(async () => {
       fs.mkdirSync(path.dirname(current), { recursive: true }); fs.copyFileSync(previous, current);
     }
   }
-  const area = screen.getPrimaryDisplay().workArea;
-  expandedSize.height = Math.min(740, area.height - 40);
-  panel = new BrowserWindow({ ...windowOptions(460, Math.min(740, area.height - 40)), minWidth: 380, minHeight: 520, x: area.x + area.width - 488, y: area.y + 20 });
+  preferences = new Preferences(path.join(app.getPath('userData'), 'preferences.json'));
+  const saved = smoke ? require('./preferences').normalize() : preferences.value;
+  const area = saved.bounds ? screen.getDisplayMatching(saved.bounds).workArea : screen.getPrimaryDisplay().workArea;
+  const bounds = fitBounds(saved.bounds || { width: 460, height: Math.min(740, area.height - 40), x: area.x + area.width - 488, y: area.y + 20 }, area);
+  expandedSize = { width: bounds.width, height: bounds.height }; expanded = saved.expanded; shortcut = saved.shortcut;
+  const size = expanded ? expandedSize : compactSize;
+  panel = new BrowserWindow({ ...windowOptions(size.width, size.height), minWidth: expanded ? 380 : compactSize.width, minHeight: expanded ? 520 : compactSize.height, resizable: expanded, focusable: expanded, x: bounds.x, y: bounds.y });
+  panel.setOpacity(saved.opacity);
   panel.setIcon(createTrayIcon());
   panel.on('blur', () => {
     if (!smoke) void collapseOnBlur();
   });
-  panel.on('resize', () => { if (expanded && !transitioning) { const bounds = panel.getBounds(); expandedSize = { width: bounds.width, height: bounds.height }; } });
+  panel.on('resize', () => { if (expanded && !transitioning) { const bounds = panel.getBounds(); expandedSize = { width: bounds.width, height: bounds.height }; scheduleSaveWindow(); } });
+  panel.on('move', scheduleSaveWindow);
   // Reserve room for the expanded panel when dragging its compact header.
   panel.on('will-move', (event, bounds) => {
     if (transitionTimer) { event.preventDefault(); return; }
@@ -154,7 +175,9 @@ app.whenReady().then(async () => {
   await Promise.all([panel.loadFile('index.html'), toast.loadFile('index.html', { query: { surface: 'toast' } })]);
   const registered = globalShortcut.register(shortcut, toggle);
   panel.webContents.send('shortcut-status', registered);
-  setupTray(); sendState(); panel.show();
+  panel.webContents.send('preferences', saved);
+  panel.webContents.send('expansion', { expanded, transitioning: false });
+  setupTray(); sendState(); if (expanded) panel.show(); else panel.showInactive();
   updates = createUpdater({ app, updater: require('electron-updater').autoUpdater, isBusy: () => !!claude?.busy, emit: value => {
     panel.webContents.send('update-status', value);
     if (value.phase === 'ready') notify('ClaudeHUD update ready', 'Open Settings to restart and install.');
@@ -175,6 +198,20 @@ app.whenReady().then(async () => {
       const result = await panel.webContents.executeJavaScript(`({messages: document.querySelectorAll('.message').length, ready: document.querySelector('#status-label').textContent, text: document.querySelector('#messages').textContent})`);
       if (result.messages !== 1 || !result.text.includes('Connected UI test response') || !result.text.includes('Allow Write?')) throw new Error(JSON.stringify(result));
       fs.writeFileSync(path.join(__dirname, 'artifacts', 'panel.png'), (await panel.webContents.capturePage()).toPNG());
+      await panel.webContents.executeJavaScript(`document.querySelector('#settings-toggle').click()`);
+      await new Promise(resolve => setTimeout(resolve, 150));
+      fs.writeFileSync(path.join(__dirname, 'artifacts', 'settings.png'), (await panel.webContents.capturePage()).toPNG());
+      await panel.webContents.executeJavaScript(`document.querySelector('#settings-close').click()`);
+      const pasteResult = await panel.webContents.executeJavaScript(`(async () => {
+        const bytes = Uint8Array.from(atob('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aWQAAAABJRU5ErkJggg=='), c => c.charCodeAt(0));
+        const transfer = new DataTransfer(); transfer.items.add(new File([bytes], 'screenshot.png', {type:'image/png'}));
+        document.querySelector('#prompt').dispatchEvent(new ClipboardEvent('paste', {clipboardData:transfer, bubbles:true, cancelable:true}));
+        await new Promise(resolve => setTimeout(resolve, 150));
+        const count = document.querySelectorAll('#attachments img').length;
+        document.querySelector('#attachments button')?.click();
+        return {count, remaining:document.querySelectorAll('#attachments img').length};
+      })()`);
+      if (pasteResult.count !== 1 || pasteResult.remaining !== 0) throw new Error('Screenshot paste/remove failed');
       const original = panel.getBounds();
       const iconPosition = () => panel.webContents.executeJavaScript(`(() => { const r = document.querySelector('.brand-mark').getBoundingClientRect(); return {x:r.x,y:r.y}; })()`);
       const iconBefore = await iconPosition();
@@ -214,7 +251,9 @@ ipcMain.handle('action', (event, action, value) => {
   if (action === 'quit') app.quit();
   if (action === 'check-updates') return updates?.check();
   if (action === 'install-update') return updates?.install();
-  if (action === 'opacity' && typeof value === 'number') panel.setOpacity(Math.max(.8, Math.min(1, value)));
+  if (action === 'opacity' && Number.isFinite(value)) { panel.setOpacity(Math.max(.8, Math.min(1, value))); if (!smoke) preferences.update({ opacity: value }); }
+  if (action === 'sound' && typeof value === 'boolean' && !smoke) preferences.update({ sound: value });
+  if (action === 'settings-view' && typeof value === 'boolean' && !smoke) preferences.update({ settingsOpen: value });
   if (action === 'shortcut') return bindShortcut(value);
   if (action === 'status' && ['Ready', 'Working', 'Finished'].includes(value)) { state = value; sendState(); }
   if (action === 'notify' && !expanded) {
@@ -254,6 +293,7 @@ ipcMain.handle('claude', async (event, action, value) => {
 });
 let quitting = false;
 app.on('before-quit', event => {
+  clearTimeout(savePositionTimer); saveWindow();
   if (claude?.busy) {
     event.preventDefault(); if (quitting) return;
     quitting = true; claude.stop();
