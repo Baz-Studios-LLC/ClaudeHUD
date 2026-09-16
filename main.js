@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, globalShortcut, screen, Tray, Menu, nativeImage, dialog, desktopCapturer } = require('electron');
+const { app, BrowserWindow, ipcMain, globalShortcut, screen, Tray, Menu, nativeImage, dialog, desktopCapturer, clipboard } = require('electron');
 const { captureGame } = require('./game-capture');
 const { ClaudeService } = require('./claude-service');
 const { createUpdater } = require('./updater');
@@ -26,6 +26,7 @@ const compactSize = { width: 155, height: 54 };
 let shortcut = 'CommandOrControl+Shift+Space';
 let state = 'Ready';
 const smoke = process.argv.includes('--smoke-test');
+let smokeCopiedCode = null;
 if (smoke) app.setPath('userData', path.join(__dirname, 'artifacts', 'smoke-profile'));
 const ownsInstance = smoke || app.requestSingleInstanceLock();
 if (!ownsInstance) app.quit();
@@ -195,11 +196,18 @@ app.whenReady().then(async () => {
     try {
       fs.mkdirSync(path.join(__dirname, 'artifacts'), { recursive: true });
       panel.webContents.send('claude-event', { type: 'snapshot', data: { project: 'C:\\Addons\\TestAddon', connection: { ready: true }, busy: false, messages: [] } });
-      panel.webContents.send('claude-event', { type: 'message', data: { id: 'test-message', role: 'Claude', text: 'Connected UI test response', time: Date.now() } });
+      panel.webContents.send('claude-event', { type: 'message', data: { id: 'test-message', role: 'Claude', text: 'Connected UI test response\n```lua\n  print("Hello, Azeroth!")\n-- <script> stays literal\n```', time: Date.now() } });
       panel.webContents.send('claude-event', { type: 'permission', data: { id: 'test-permission', tool: 'Write', input: { file_path: 'TestAddon.lua', content: '-- UI test only' } } });
       await new Promise(resolve => setTimeout(resolve, 500));
       const result = await panel.webContents.executeJavaScript(`({messages: document.querySelectorAll('.message').length, ready: document.querySelector('#status-label').textContent, text: document.querySelector('#messages').textContent})`);
       if (result.messages !== 1 || !result.text.includes('Connected UI test response') || !result.text.includes('Allow Write?')) throw new Error(JSON.stringify(result));
+      const codeResult = await panel.webContents.executeJavaScript(`(async () => {
+        const block = document.querySelector('.code-block');
+        const copy = block.querySelector('button'); copy.click();
+        await new Promise(resolve => setTimeout(resolve, 100));
+        return { text: block.querySelector('code').textContent, label: copy.textContent, unsafe: !!block.querySelector('script') };
+      })()`);
+      if (codeResult.text !== '  print("Hello, Azeroth!")\n-- <script> stays literal\n' || codeResult.label !== 'Copied!' || codeResult.unsafe || smokeCopiedCode !== codeResult.text) throw new Error('Code formatting/copy failed');
       fs.writeFileSync(path.join(__dirname, 'artifacts', 'panel.png'), (await panel.webContents.capturePage()).toPNG());
       await panel.webContents.executeJavaScript(`document.querySelector('#settings-toggle').click()`);
       await new Promise(resolve => setTimeout(resolve, 150));
@@ -215,6 +223,31 @@ app.whenReady().then(async () => {
         return {count, remaining:document.querySelectorAll('#attachments img').length};
       })()`);
       if (pasteResult.count !== 1 || pasteResult.remaining !== 0) throw new Error('Screenshot paste/remove failed');
+      const jumpResult = await panel.webContents.executeJavaScript(`(async () => {
+        const messages = document.querySelector('#messages');
+        const spacer = document.createElement('div'); spacer.style.height = '2000px'; messages.append(spacer);
+        messages.scrollTop = 0;
+        await new Promise(resolve => setTimeout(resolve, 100));
+        const visible = !document.querySelector('#jump-latest').hidden;
+        document.querySelector('#jump-latest').click();
+        const atBottom = messages.scrollHeight - messages.scrollTop - messages.clientHeight <= 1;
+        const hidden = document.querySelector('#jump-latest').hidden;
+        spacer.remove();
+        return { visible, atBottom, hidden };
+      })()`);
+      if (!jumpResult.visible || !jumpResult.atBottom || !jumpResult.hidden) throw new Error('Jump to latest failed');
+      panel.webContents.send('claude-event', { type: 'permission', data: { id: 'test-question', tool: 'AskUserQuestion', input: { questions: [{ question: 'Choose features', multiSelect: true, options: [{ label: 'First choice' }, { label: 'Second choice' }] }] } } });
+      await new Promise(resolve => setTimeout(resolve, 100));
+      const questionResult = await panel.webContents.executeJavaScript(`(() => {
+        const choices = document.querySelectorAll('.question-options button');
+        choices[0].click(); choices[1].click(); choices[0].click();
+        const input = choices[0].closest('.permission-card').querySelector('textarea');
+        const toggled = input.value === 'Second choice' && choices[0].getAttribute('aria-pressed') === 'false' && choices[1].getAttribute('aria-pressed') === 'true';
+        const gap = getComputedStyle(choices[0].parentElement).gap;
+        input.value = 'Custom answer'; input.dispatchEvent(new Event('input'));
+        return toggled && gap === '8px' && choices[1].getAttribute('aria-pressed') === 'false';
+      })()`);
+      if (!questionResult) throw new Error('Question selection feedback failed');
       const original = panel.getBounds();
       const iconPosition = () => panel.webContents.executeJavaScript(`(() => { const r = document.querySelector('.brand-mark').getBoundingClientRect(); return {x:r.x,y:r.y}; })()`);
       const iconBefore = await iconPosition();
@@ -248,6 +281,12 @@ app.whenReady().then(async () => {
 });
 ipcMain.handle('action', async (event, action, value) => {
   if (![panel, toast].some(w => w && w.webContents === event.sender)) return;
+  if (action === 'copy-code' && event.sender === panel?.webContents) {
+    if (typeof value !== 'string' || value.length > 2 * 1024 * 1024) return { error: 'Code is too large to copy.' };
+    if (smoke) smokeCopiedCode = value;
+    else clipboard.writeText(value);
+    return { ok: true };
+  }
   if (action === 'capture-game' && event.sender === panel?.webContents) {
     if (capturing || transitioning || nativeDialogOpen) return { error: 'Wait a moment and try capturing again.' };
     capturing = true;

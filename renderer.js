@@ -22,7 +22,16 @@ let capturing = false;
 const modeDescriptions = { default: 'Ask before changes and commands', auto: 'Claude handles permission decisions', acceptEdits: 'Automatically accept file edits', plan: 'Plan before making changes', bypassPermissions: 'Allow tools without permission prompts' };
 const messageNodes = new Map(), requests = new Map();
 const welcome = $('#messages').innerHTML;
-function scrollToBottom() { $('#messages').scrollTop = $('#messages').scrollHeight; }
+function updateJumpButton() {
+  const messages = $('#messages');
+  $('#jump-latest').hidden = messages.scrollHeight - messages.scrollTop - messages.clientHeight <= 24;
+}
+function scrollToBottom() { $('#messages').scrollTop = $('#messages').scrollHeight; updateJumpButton(); }
+$('#messages').addEventListener('scroll', updateJumpButton, { passive: true });
+$('#messages').addEventListener('load', updateJumpButton, true);
+new ResizeObserver(updateJumpButton).observe($('#messages'));
+new MutationObserver(updateJumpButton).observe($('#messages'), { childList: true, subtree: true, characterData: true });
+$('#jump-latest').onclick = () => { scrollToBottom(); $('#prompt').focus(); };
 function contextUsage(context) {
   const known = context && Number.isFinite(context.used);
   const hasLimit = known && Number.isFinite(context.limit) && context.limit > 0;
@@ -42,6 +51,39 @@ function controls() {
   $('#model-picker').disabled = busy;
   $('#permission-mode').title = busy ? 'Stop the current task to change mode' : modeDescriptions[permissionMode];
 }
+function renderMessageText(container, text) {
+  const parts = splitMessage(text);
+  parts.forEach((part, index) => {
+    let node = container.children[index];
+    if (!node || node.dataset.kind !== part.type) {
+      const replacement = document.createElement(part.type === 'code' ? 'section' : 'p');
+      replacement.dataset.kind = part.type;
+      if (node) node.replaceWith(replacement); else container.append(replacement);
+      node = replacement;
+      if (part.type === 'code') {
+        node.className = 'code-block';
+        const toolbar = document.createElement('div'); toolbar.className = 'code-toolbar';
+        const language = document.createElement('span'); language.className = 'code-language';
+        const copy = document.createElement('button'); copy.type = 'button'; copy.textContent = 'Copy'; copy.setAttribute('aria-label', 'Copy code');
+        const pre = document.createElement('pre'), code = document.createElement('code'); pre.append(code);
+        copy.onclick = async () => {
+          try {
+            const result = await action('copy-code', code.textContent);
+            if (!result?.ok) throw new Error('Copy failed');
+            copy.textContent = 'Copied!';
+          } catch { copy.textContent = 'Try again'; }
+          clearTimeout(copy.resetTimer); copy.resetTimer = setTimeout(() => { copy.textContent = 'Copy'; }, 1800);
+        };
+        toolbar.append(language, copy); node.append(toolbar, pre);
+      }
+    }
+    if (part.type === 'code') {
+      node.querySelector('.code-language').textContent = part.language || 'Code';
+      const code = node.querySelector('code'); if (code.textContent !== part.text) code.textContent = part.text;
+    } else if (node.textContent !== part.text) node.textContent = part.text;
+  });
+  while (container.children.length > parts.length) container.lastElementChild.remove();
+}
 function message(item) {
   let body = messageNodes.get(item.id);
   const nearBottom = $('#messages').scrollHeight - $('#messages').scrollTop - $('#messages').clientHeight < 100;
@@ -52,7 +94,7 @@ function message(item) {
     const meta = document.createElement('div'); meta.className = 'message-meta';
     const strong = document.createElement('strong'); strong.textContent = item.role;
     const time = document.createElement('time'); time.textContent = item.time ? new Date(item.time).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : '';
-    meta.append(strong, time); const p = document.createElement('p'); p.className = 'response-text';
+    meta.append(strong, time); const p = document.createElement('div'); p.className = 'response-text';
     body.append(meta, p); article.append(avatar, body); $('#messages').append(article); messageNodes.set(item.id, body);
     if (item.images?.length) {
       const images = document.createElement('div'); images.className = 'message-images';
@@ -62,7 +104,7 @@ function message(item) {
       body.append(images);
     }
   }
-  body.querySelector('.response-text').textContent = item.text;
+  renderMessageText(body.querySelector('.response-text'), item.text);
   if (nearBottom || item.role === 'You') scrollToBottom();
 }
 function localError(text) { message({ id: crypto.randomUUID(), role: 'System', text, time: Date.now() }); scrollToBottom(); }
@@ -85,10 +127,22 @@ function permission(data) {
     for (const question of data.input.questions || []) {
       const label = document.createElement('label'); label.textContent = question.question;
       const input = document.createElement('textarea'); input.rows = 2; input.placeholder = 'Your answer…'; label.append(input); card.append(label); answers.set(question.question, input);
+      const options = document.createElement('div'); options.className = 'question-options';
+      const selected = new Set();
+      const updateSelection = () => {
+        for (const button of options.children) button.setAttribute('aria-pressed', String(selected.has(button.textContent)));
+      };
+      input.addEventListener('input', () => { selected.clear(); updateSelection(); });
       for (const option of question.options || []) {
         const button = document.createElement('button'); button.className = 'quiet'; button.textContent = option.label; button.title = option.description || '';
-        button.onclick = () => { input.value = question.multiSelect && input.value ? `${input.value}, ${option.label}` : option.label; }; card.append(button);
+        button.type = 'button'; button.setAttribute('aria-pressed', 'false');
+        button.onclick = () => {
+          if (!question.multiSelect) selected.clear();
+          if (selected.has(option.label)) selected.delete(option.label); else selected.add(option.label);
+          input.value = [...selected].join(', '); updateSelection();
+        }; options.append(button);
       }
+      if (options.childElementCount) card.append(options);
     }
   } else {
     const details = document.createElement('pre'); details.textContent = JSON.stringify(data.input, null, 2); card.append(details);

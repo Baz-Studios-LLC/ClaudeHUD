@@ -7,6 +7,7 @@ files:
   - game-capture.js
   - preload.js
   - renderer.js
+  - message-format.js
   - claude-service.js
   - context-usage.js
   - preferences.js

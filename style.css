@@ -3,6 +3,9 @@
 body{margin:0;background:transparent}
 button,select,textarea,input{font:inherit}
 button{cursor:pointer;color:inherit}
+button:disabled{cursor:default}
+button:active:not(:disabled){filter:brightness(.8)}
+button:active:not(:disabled):not(.brand-mark){translate:0 1px}
 button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid #d97757;outline-offset:3px}
 [hidden]{display:none!important}
 .panel{height:100vh;display:flex;flex-direction:column;background:#1e1e1c;border:1px solid #45443f;border-radius:15px;overflow:hidden}
@@ -22,6 +25,9 @@ button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid 
 .demo-banner p{margin:0}
 .demo-banner strong{color:#ecb49e;font-weight:500}
 .messages{flex:1;overflow:auto;padding:0 21px 20px;scrollbar-width:thin;scrollbar-color:#48453e transparent;min-height:0}
+.conversation-view{position:relative;display:flex;flex:1;min-height:0}
+#jump-latest{position:absolute;bottom:10px;left:50%;transform:translateX(-50%);padding:7px 12px;border:1px solid #78503d;border-radius:18px;background:#30261f;color:#efb9a2;font-size:11px;white-space:nowrap;box-shadow:0 2px 8px #0005}
+#jump-latest:hover{background:#443127}
 .welcome{padding:30px 0 24px}
 .welcome-icon{width:50px;height:50px;display:grid;place-items:center;font-size:35px;background:linear-gradient(140deg,#493127,#302620);color:#d97757;border:1px solid #664536;border-radius:16px;margin-bottom:17px}
 .welcome h1{font-size:25px;letter-spacing:-.8px;margin:0 0 7px;font-weight:650}
@@ -33,6 +39,13 @@ button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid 
 .avatar.claude{background:#463027;color:#eab099}
 .avatar.you{background:#2c3740;color:#a4c2dc;font-size:12px;font-weight:700}
 .message-body{min-width:0;flex:1}
+.code-block{margin:10px 0;border:1px solid #454039;border-radius:8px;overflow:hidden;background:#171715}
+.code-toolbar{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:6px 10px;background:#292620;color:#b0aea5;font-size:10px}
+.code-language{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.code-toolbar button{border:0;border-radius:4px;background:transparent;color:#efb9a2;padding:3px 6px;font-size:10px;flex-shrink:0}
+.code-toolbar button:hover{background:#443127}
+.code-block pre{margin:0;padding:12px;overflow-x:auto;white-space:pre;tab-size:2;font:11px/1.6 Consolas,'Cascadia Mono',monospace;color:#e5e2d9}
+.code-block code{font:inherit}
 .message-meta{display:flex;align-items:center;gap:7px;height:21px}
 .message-meta strong{font-size:12px;font-weight:600}
 .bot-tag{font-size:7px;letter-spacing:.7px;padding:2px 4px;background:#463027;color:#edb69f;border-radius:3px}
@@ -114,6 +127,10 @@ kbd{font:inherit;color:#c4beb2}
 .permission-card label{display:block;line-height:1.5;margin:12px 0}
 .permission-card textarea{display:block;width:100%;background:#1e1e1c;color:#faf9f5;border:1px solid #685044;border-radius:5px;padding:8px;margin-top:5px;resize:vertical}
 .permission-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:12px}
+.question-options{display:flex;flex-wrap:wrap;gap:8px;margin:4px 0 14px}
+.question-options button{padding:9px 12px;max-width:100%;white-space:normal;overflow-wrap:anywhere;text-align:left;line-height:1.4}
+.question-options button:hover:not(:disabled),.quiet:hover:not(:disabled){background:#443127;border-color:#a16b51}
+.question-options button[aria-pressed="true"]{background:#4b3024;border-color:#d97757;color:#faf9f5;box-shadow:inset 0 0 0 1px #d97757}
 .approve{background:#d97757;color:#141413;border:0;border-radius:5px;padding:7px 12px;font-weight:600}
 .resolved{opacity:.65}
 .toast small{max-height:34px;overflow:hidden}
