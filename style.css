@@ -8,9 +8,9 @@ button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid 
 .panel{height:100vh;display:flex;flex-direction:column;background:#1e1e1c;border:1px solid #45443f;border-radius:15px;overflow:hidden}
 .titlebar{height:52px;flex-shrink:0;display:flex;align-items:center;justify-content:space-between;padding:0 14px 0 19px;background:#141413;-webkit-app-region:drag}
 .brand{font-size:14px;font-weight:700;display:flex;align-items:center;gap:3px}
-.brand>span:not(.brand-mark):not(.version){color:#d97757}
+
 .brand-mark{color:#d97757;font-size:29px;margin-right:8px}
-.version{font-size:8px;letter-spacing:1.2px;color:#9c998f;border:1px solid #3d3c36;border-radius:4px;padding:3px 5px;margin-left:10px}
+.model-label{font-size:10px;font-weight:400;color:#b0aea5;margin-left:8px;max-width:100px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .window-actions{display:flex;gap:4px;-webkit-app-region:no-drag}
 .window-actions button,.section-heading button{border:0;background:transparent;font-size:21px;color:#b0aea5;border-radius:6px;width:30px;height:30px}
 .window-actions button:hover,.section-heading button:hover{background:#34332e;color:white}
@@ -54,6 +54,9 @@ button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid 
 .composer-tools>span>span{color:#a09b90;font-size:10px;margin-left:4px}
 #send{height:30px;width:30px;display:grid;place-items:center;flex-shrink:0;padding:0;background:#d97757;border:0;border-radius:8px;color:#141413}
 #send svg{display:block}
+#capture-game{height:30px;width:30px;display:grid;place-items:center;padding:0;border:0;border-radius:6px;background:transparent;color:#b0aea5}
+#capture-game:hover:not(:disabled){background:#39352e;color:#d97757}
+#capture-game:disabled{opacity:.35;cursor:default}
 #send:hover:not(:disabled){background:#e99a7d}
 #send:disabled{opacity:.35;cursor:default}
 kbd{font:inherit;color:#c4beb2}
@@ -89,7 +92,7 @@ kbd{font:inherit;color:#c4beb2}
 .brand-copy{font-size:14px;line-height:18px}
 #badge-status{display:block;font-size:10px;line-height:14px;font-weight:400;color:#b3bda0}
 .window-actions{flex-shrink:0;margin-left:auto}
-.collapsed .version,.collapsed #settings-toggle,.collapsed #close-app{display:none}
+.collapsed .model-label,.collapsed #settings-toggle,.collapsed #close-app{display:none}
 .collapsed .window-actions{display:none}
 .collapsed .panel> :not(.titlebar){visibility:hidden;pointer-events:none}
 .transitioning .titlebar{-webkit-app-region:no-drag}

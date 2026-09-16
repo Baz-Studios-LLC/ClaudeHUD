@@ -14,7 +14,22 @@ class ClaudeService {
     try { if (fs.existsSync(storage)) this.data = JSON.parse(fs.readFileSync(storage, 'utf8')); } catch { this.connection.detail = 'Saved conversation could not be loaded.'; }
     if (!this.data.sessions || typeof this.data.sessions !== 'object') this.data = { project: null, sessions: {} };
   }
-  snapshot() { return { context: this.session()?.context || null, permissionMode: this.data.permissionMode || 'default', project: this.data.project, title: this.session()?.title, messages: this.session()?.messages || [], connection: this.connection, busy: this.busy }; }
+  modelState() { return { model: this.data.model || 'default', activeModel: this.session()?.activeModel || null }; }
+  setModel(model) {
+    if (this.busy) throw new Error('Stop the current task before changing model.');
+    if (!['default', 'claude-fable-5-1', 'claude-opus-5', 'claude-sonnet-5', 'claude-haiku-4-5'].includes(model)) throw new Error('Unknown model.');
+    this.data.model = model;
+    for (const session of Object.values(this.data.sessions)) session.activeModel = null;
+    this.save();
+    this.emit('model', this.modelState());
+    return this.modelState();
+  }
+  reportModel(model) {
+    if (typeof model !== 'string' || !model || model === '<synthetic>') return;
+    this.session().activeModel = model;
+    this.emit('model', this.modelState());
+  }
+  snapshot() { return { ...this.modelState(), context: this.session()?.context || null, permissionMode: this.data.permissionMode || 'default', project: this.data.project, title: this.session()?.title, messages: this.session()?.messages || [], connection: this.connection, busy: this.busy }; }
   setPermissionMode(mode) {
     if (this.busy) throw new Error('Stop the current task before changing permission mode.');
     if (!['default', 'auto', 'acceptEdits', 'plan', 'bypassPermissions'].includes(mode)) throw new Error('Unknown permission mode.');
@@ -145,9 +160,11 @@ class ClaudeService {
         spawnClaudeCodeProcess: opts => spawn(opts.command, opts.args, { cwd: opts.cwd, env: opts.env, signal: opts.signal, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] })
       };
       if (this.session().sessionId) options.resume = this.session().sessionId;
+      if (this.data.model && this.data.model !== 'default') options.model = this.data.model;
       stream = query({ prompt, options });
       for await (const event of stream) {
         if (event.session_id) this.session().sessionId = event.session_id;
+        if (event.type === 'system' && event.subtype === 'init') this.reportModel(event.model);
         if (event.type === 'system' && event.subtype === 'compact_boundary') {
           this.session().context = null; this.emit('context', null);
         }
@@ -161,6 +178,7 @@ class ClaudeService {
         }
         if (event.type === 'assistant') {
           if (!event.parent_tool_use_id) {
+            this.reportModel(event.message.model);
             this.session().context = latestContext(event.message, this.session().context);
             this.emit('context', this.session().context);
           }

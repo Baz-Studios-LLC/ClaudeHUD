@@ -10,6 +10,43 @@ function fixture(queryFactory) {
   service.connection = { ready: true }; service.selectProject(root); return { service, events, root };
 }
 async function idle(service) { for (let i = 0; i < 100 && service.busy; i++) await new Promise(r => setTimeout(r, 10)); assert.equal(service.busy, false); }
+test('model selection persists, applies to resumed turns, and reports the actual model', async () => {
+  const options = [];
+  const { service, root, events } = fixture(args => {
+    options.push(args.options);
+    return (async function* () {
+      yield { type: 'system', subtype: 'init', session_id: 'model-session', model: 'claude-opus-4-6' };
+      yield { type: 'result', subtype: 'success', result: 'OK' };
+    })();
+  });
+  try {
+    assert.equal(service.snapshot().model, 'default');
+    service.setModel('claude-opus-5');
+    await service.send('First'); await idle(service);
+    assert.equal(options[0].model, 'claude-opus-5');
+    assert.equal(service.snapshot().activeModel, 'claude-opus-4-6');
+    assert.ok(events.some(event => event.type === 'model' && event.data.activeModel === 'claude-opus-4-6'));
+    const restored = new ClaudeService({ storage: service.storage, emit() {} });
+    assert.equal(restored.snapshot().model, 'claude-opus-5');
+    assert.equal(restored.snapshot().activeModel, 'claude-opus-4-6');
+    service.setModel('claude-sonnet-5');
+    assert.equal(service.snapshot().activeModel, null);
+    await service.send('Second'); await idle(service);
+    assert.equal(options[1].model, 'claude-sonnet-5');
+    assert.equal(options[1].resume, 'model-session');
+    service.setModel('default');
+    await service.send('Third'); await idle(service);
+    assert.equal(Object.hasOwn(options[2], 'model'), false);
+    service.setModel('claude-fable-5-1');
+    await service.send('Fourth'); await idle(service);
+    assert.equal(options[3].model, 'claude-fable-5-1');
+    assert.equal(new ClaudeService({ storage: service.storage, emit() {} }).snapshot().model, 'claude-fable-5-1');
+    service.busy = true;
+    assert.throws(() => service.setModel('claude-haiku-4-5'), /Stop/);
+    service.busy = false;
+    assert.throws(() => service.setModel('invalid'), /Unknown/);
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
 test('streams once, resumes correct session, and restores saved project history', async () => {
   const options = [];
   const { service, root } = fixture(({ options: opts }) => {

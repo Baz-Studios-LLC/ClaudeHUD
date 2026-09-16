@@ -5,7 +5,20 @@ const bridge = window.hud;
 const action = (name, value) => bridge.action(name, value);
 let busy = false, audio, project, connected = false;
 let permissionMode = 'default';
+let selectedModel = 'default';
+function modelState(data) {
+  selectedModel = data.model || 'default';
+  $('#model-picker').value = selectedModel;
+  const families = { opus: 'Opus', sonnet: 'Sonnet', haiku: 'Haiku', fable: 'Fable' };
+  const labels = { default: 'Claude default', 'claude-fable-5-1': 'Fable 5.1', 'claude-opus-5': 'Opus 5', 'claude-sonnet-5': 'Sonnet 5', 'claude-haiku-4-5': 'Haiku 4.5' };
+  const actual = data.activeModel;
+  const match = actual?.match(/^claude-(opus|sonnet|haiku|fable)-(\d+)(?:-(\d+))?/);
+  const label = match ? `${families[match[1]]} ${match[2]}${match[3] && match[3].length < 3 ? '.' + match[3] : ''}` : actual;
+  $('#model-label').textContent = label || labels[selectedModel];
+  $('#model-label').title = actual ? `Current model: ${actual}` : `Next message: ${labels[selectedModel]}`;
+}
 let attachments = [], pasting = 0, draftEpoch = 0;
+let capturing = false;
 const modeDescriptions = { default: 'Ask before changes and commands', auto: 'Claude handles permission decisions', acceptEdits: 'Automatically accept file edits', plan: 'Plan before making changes', bypassPermissions: 'Allow tools without permission prompts' };
 const messageNodes = new Map(), requests = new Map();
 const welcome = $('#messages').innerHTML;
@@ -22,9 +35,11 @@ function contextUsage(context) {
   $('#context-usage').classList.toggle('context-high', percent >= 80);
 }
 function controls() {
-  $('#send').disabled = busy || pasting > 0 || !connected || !project;
+  $('#send').disabled = busy || pasting > 0 || capturing || !connected || !project;
+  $('#capture-game').disabled = capturing || pasting > 0 || attachments.length >= 4;
   $('#stop').hidden = !busy; $('#choose-project').disabled = busy; $('#new-chat').disabled = busy; $('#conversations-open').disabled = busy;
   $('#permission-mode').disabled = busy;
+  $('#model-picker').disabled = busy;
   $('#permission-mode').title = busy ? 'Stop the current task to change mode' : modeDescriptions[permissionMode];
 }
 function message(item) {
@@ -93,6 +108,7 @@ bridge.onClaude(({ type, data }) => {
     draftEpoch++; attachments = []; renderAttachments();
     project = data.project; connected = data.connection.ready; busy = data.busy;
     contextUsage(data.context);
+    modelState(data);
     permissionMode = data.permissionMode || 'default'; $('#permission-mode').value = permissionMode;
     $('#conversation-title').textContent = data.title || 'Addon conversation';
     $('#conversation-title').title = data.title || 'Addon conversation';
@@ -105,6 +121,7 @@ bridge.onClaude(({ type, data }) => {
     for (const item of data.messages) message(item); scrollToBottom(); controls();
   }
   if (type === 'message') message(data);
+  if (type === 'model') modelState(data);
   if (type === 'context') contextUsage(data);
   if (type === 'busy') { busy = data; controls(); }
   if (type === 'activity') $('#status-label').textContent = data;
@@ -156,7 +173,7 @@ $('#shortcut').onchange = async event => {
 };
 document.addEventListener('keydown', event => { if (event.key === 'Escape') { if (!$('#settings').hidden) showSettings(false); else action('collapse'); } });
 async function submit() {
-  const text = $('#prompt').value.trim(); if ((!text && !attachments.length) || busy || pasting) return;
+  const text = $('#prompt').value.trim(); if ((!text && !attachments.length) || busy || pasting || capturing) return;
   const sent = [...attachments];
   busy = true; controls(); const result = await claude('send', { text, images: sent.map(({ type, data }) => ({ type, data })) });
   if (result) { $('#prompt').value = ''; resizePrompt(); attachments = attachments.filter(item => !sent.includes(item)); renderAttachments(); } else { busy = false; controls(); }
@@ -181,7 +198,23 @@ function renderAttachments() {
     remove.onclick = () => { attachments = attachments.filter(item => item !== attachment); renderAttachments(); };
     preview.append(image, remove); $('#attachments').append(preview);
   }
+  controls();
 }
+$('#capture-game').onclick = async () => {
+  if (capturing || pasting || attachments.length >= 4) return;
+  capturing = true; controls();
+  const epoch = draftEpoch;
+  $('#capture-game').setAttribute('aria-busy', 'true');
+  try {
+    const result = await action('capture-game');
+    if (result?.error) throw new Error(result.error);
+    if (!result?.image) throw new Error('Could not capture the game.');
+    if (epoch !== draftEpoch) throw new Error('Conversation changed. Take the screenshot again.');
+    if (attachments.length >= 4) throw new Error('You can attach up to four screenshots per message.');
+    attachments.push(result.image); renderAttachments();
+  } catch (error) { localError(error.message); }
+  finally { capturing = false; controls(); $('#capture-game').removeAttribute('aria-busy'); $('#prompt').focus(); }
+};
 $('#prompt').addEventListener('paste', async event => {
   const files = [...(event.clipboardData?.items || [])].filter(item => item.kind === 'file' && item.type.startsWith('image/')).map(item => item.getAsFile()).filter(Boolean);
   if (!files.length) return;
@@ -207,6 +240,11 @@ $('#permission-mode').onchange = async event => {
   const result = await claude('permission-mode', event.target.value);
   if (result) permissionMode = result.mode;
   event.target.value = permissionMode; controls();
+};
+$('#model-picker').onchange = async event => {
+  const result = await claude('model', event.target.value);
+  if (result) modelState(result);
+  else event.target.value = selectedModel;
 };
 bridge.onUpdate(value => {
   $('#update-status').textContent = `ClaudeHUD ${value.version} · ${value.detail}`;

@@ -4,6 +4,7 @@ directories:
   output: dist
 files:
   - main.js
+  - game-capture.js
   - preload.js
   - renderer.js
   - claude-service.js

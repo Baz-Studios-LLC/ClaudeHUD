@@ -1,4 +1,5 @@
-const { app, BrowserWindow, ipcMain, globalShortcut, screen, Tray, Menu, nativeImage, dialog } = require('electron');
+const { app, BrowserWindow, ipcMain, globalShortcut, screen, Tray, Menu, nativeImage, dialog, desktopCapturer } = require('electron');
+const { captureGame } = require('./game-capture');
 const { ClaudeService } = require('./claude-service');
 const { createUpdater } = require('./updater');
 const { Preferences, fitBounds } = require('./preferences');
@@ -15,6 +16,7 @@ function saveWindow() {
 }
 function scheduleSaveWindow() { if (transitioning) return; clearTimeout(savePositionTimer); savePositionTimer = setTimeout(saveWindow, 200); }
 let nativeDialogOpen = false;
+let capturing = false;
 let expanded = true;
 let expandedSize = { width: 460, height: 740 };
 let transitionTimer, finishTransition;
@@ -54,6 +56,7 @@ function claudeEvent(type, data) {
   if (state !== previousState) sendState();
 }
 function setExpanded(next) {
+  if (capturing) return Promise.resolve();
   if (next === expanded && !transitionTimer) {
     if (next) { panel.focus(); panel.webContents.send('focus-input'); }
     return Promise.resolve();
@@ -100,7 +103,7 @@ function openPanel() { return setExpanded(true); }
 function collapse() { return setExpanded(false); }
 function toggle() { return setExpanded(!expanded); }
 function collapseOnBlur() {
-  if (expanded && !nativeDialogOpen && !quitting) return collapse();
+  if (expanded && !nativeDialogOpen && !capturing && !quitting) return collapse();
   return Promise.resolve();
 }
 function createTrayIcon() {
@@ -243,8 +246,21 @@ app.whenReady().then(async () => {
     } catch (error) { console.error(error); app.exit(1); }
   }
 });
-ipcMain.handle('action', (event, action, value) => {
+ipcMain.handle('action', async (event, action, value) => {
   if (![panel, toast].some(w => w && w.webContents === event.sender)) return;
+  if (action === 'capture-game' && event.sender === panel?.webContents) {
+    if (capturing || transitioning || nativeDialogOpen) return { error: 'Wait a moment and try capturing again.' };
+    capturing = true;
+    try {
+      panel.hide(); toast.hide();
+      await new Promise(resolve => setTimeout(resolve, 200));
+      return { image: await captureGame({ desktopCapturer, displays: screen.getAllDisplays() }) };
+    } catch (error) { return { error: error.message }; }
+    finally {
+      if (!panel.isDestroyed()) { panel.show(); panel.focus(); }
+      capturing = false;
+    }
+  }
   if (action === 'open') openPanel();
   if (action === 'collapse') collapse();
   if (action === 'toggle') toggle();
@@ -267,6 +283,7 @@ ipcMain.handle('claude', async (event, action, value) => {
   try {
     if (action === 'snapshot') return claude.snapshot();
     if (action === 'permission-mode') return claude.setPermissionMode(value);
+    if (action === 'model') return claude.setModel(value);
     if (action === 'list-conversations') return { conversations: await claude.listConversations() };
     if (action === 'load-conversation') await claude.loadConversation(value);
     if (action === 'connect') return await claude.connect();

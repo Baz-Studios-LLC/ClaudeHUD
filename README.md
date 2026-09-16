@@ -19,6 +19,10 @@ Completed tasks and requests for input show a toast while collapsed. Right-click
 
 ## Conversations and projects
 
+Click the **camera button** beside Send to attach a screenshot of the open World of Warcraft window. The overlay briefly hides during capture and returns with a thumbnail for review; the image is not sent until you press Send. Keep WoW restored in borderless mode. If multiple WoW windows are open, capture requires keeping just one open. Clipboard paste remains available for other images.
+
+**Settings → Model** selects Claude Code default, Fable 5.1, Opus 5, Sonnet 5, or Haiku 4.5 for the next message. The choice persists across restarts and can be changed while Claude is idle. The header shows the selected model until Claude reports the actual model. Availability depends on your Claude account; Fable may use usage credits depending on your plan.
+
 Paste screenshots into the message box with **Ctrl+V**. Review the thumbnails, remove any unwanted attachment, and send with or without text. Up to four PNG/JPEG/WebP/GIF images, each no larger than 30 MB, can be attached per message. Claude Code handles image preparation for its API limits. Sent screenshots are saved with the local conversation and sent to Claude as image content.
 
 **Settings → Load conversation** lists the 200 most recently used local Claude Code sessions, including desktop Code sessions visible to the SDK. Search by title or folder, then select a row to load its history and resume its original session in its original project folder. Finish any running turn in the desktop app before continuing the same session in ClaudeHUD.
