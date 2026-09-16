@@ -131,6 +131,14 @@ kbd{font:inherit;color:#c4beb2}
 .question-options button{padding:9px 12px;max-width:100%;white-space:normal;overflow-wrap:anywhere;text-align:left;line-height:1.4}
 .question-options button:hover:not(:disabled),.quiet:hover:not(:disabled){background:#443127;border-color:#a16b51}
 .question-options button[aria-pressed="true"]{background:#4b3024;border-color:#d97757;color:#faf9f5;box-shadow:inset 0 0 0 1px #d97757}
+#message-queue{flex-shrink:0;margin:0 15px 8px;padding:8px 10px;border:1px solid #514338;border-radius:8px;background:#26231f;font-size:10px}
+#queue-label{color:#b0aea5;margin-bottom:5px}
+#queue-items{max-height:130px;overflow-y:auto}
+.queued-message+.queued-message{border-top:1px solid #514338;margin-top:8px;padding-top:8px}
+.queued-message p{margin:0 0 6px;white-space:pre-wrap;overflow-wrap:anywhere;max-height:70px;overflow:auto}
+.queued-actions{display:flex;gap:8px}
+.queued-images{display:flex;gap:5px;margin-bottom:6px}
+.queued-images img{width:48px;height:36px;object-fit:contain;border-radius:4px}
 .approve{background:#d97757;color:#141413;border:0;border-radius:5px;padding:7px 12px;font-weight:600}
 .resolved{opacity:.65}
 .toast small{max-height:34px;overflow:hidden}

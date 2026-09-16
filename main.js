@@ -208,6 +208,15 @@ app.whenReady().then(async () => {
         return { text: block.querySelector('code').textContent, label: copy.textContent, unsafe: !!block.querySelector('script') };
       })()`);
       if (codeResult.text !== '  print("Hello, Azeroth!")\n-- <script> stays literal\n' || codeResult.label !== 'Copied!' || codeResult.unsafe || smokeCopiedCode !== codeResult.text) throw new Error('Code formatting/copy failed');
+      panel.webContents.send('claude-event', { type: 'busy', data: true });
+      panel.webContents.send('claude-event', { type: 'queue', data: [{ id: 'queue-test', text: 'Also check the minimap button spacing.', images: [] }] });
+      await new Promise(resolve => setTimeout(resolve, 100));
+      const queueResult = await panel.webContents.executeJavaScript(`({ visible: !document.querySelector('#message-queue').hidden, enabled: !document.querySelector('#send').disabled, label: document.querySelector('#send').getAttribute('aria-label'), actions: [...document.querySelectorAll('.queued-actions button')].map(button => button.textContent) })`);
+      if (!queueResult.visible || !queueResult.enabled || queueResult.label !== 'Queue message' || queueResult.actions.join(',') !== 'Send now,Remove') throw new Error('Queue controls failed');
+      fs.writeFileSync(path.join(__dirname, 'artifacts', 'queue.png'), (await panel.webContents.capturePage()).toPNG());
+      panel.webContents.send('claude-event', { type: 'queue', data: [] });
+      panel.webContents.send('claude-event', { type: 'busy', data: false });
+      await new Promise(resolve => setTimeout(resolve, 100));
       fs.writeFileSync(path.join(__dirname, 'artifacts', 'panel.png'), (await panel.webContents.capturePage()).toPNG());
       await panel.webContents.executeJavaScript(`document.querySelector('#settings-toggle').click()`);
       await new Promise(resolve => setTimeout(resolve, 150));
@@ -335,6 +344,8 @@ ipcMain.handle('claude', async (event, action, value) => {
       } finally { nativeDialogOpen = false; panel.focus(); }
     }
     if (action === 'send') await claude.send(value);
+    if (action === 'remove-queued') claude.removeQueued(value);
+    if (action === 'send-queued-now') await claude.sendQueuedNow(value);
     if (action === 'stop') claude.stop();
     if (action === 'respond') claude.respond(value);
     if (action === 'new-chat') {

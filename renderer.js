@@ -4,6 +4,29 @@ for (const name of ['panel', 'toast']) $(`#${name}`).hidden = name !== surface;
 const bridge = window.hud;
 const action = (name, value) => bridge.action(name, value);
 let busy = false, audio, project, connected = false;
+let submitting = false;
+function renderQueue(items = []) {
+  $('#message-queue').hidden = !items.length;
+  $('#queue-items').replaceChildren();
+  for (const item of items) {
+    const row = document.createElement('div'); row.className = 'queued-message';
+    const text = document.createElement('p'); text.textContent = item.text || 'Screenshot'; row.append(text);
+    if (item.images?.length) {
+      const images = document.createElement('div'); images.className = 'queued-images';
+      for (const attachment of item.images) { const image = document.createElement('img'); image.src = `data:${attachment.type};base64,${attachment.data}`; image.alt = 'Queued screenshot'; images.append(image); }
+      row.append(images);
+    }
+    const buttons = document.createElement('div'); buttons.className = 'queued-actions';
+    for (const [label, name] of [['Send now', 'send-queued-now'], ['Remove', 'remove-queued']]) {
+      const button = document.createElement('button'); button.type = 'button'; button.className = 'quiet'; button.textContent = label;
+      button.title = name === 'send-queued-now' ? 'Interrupt the current task and send this message' : 'Remove this queued message';
+      button.onclick = async () => { for (const control of $('#queue-items').querySelectorAll('button')) control.disabled = true; await claude(name, item.id); for (const control of $('#queue-items').querySelectorAll('button')) control.disabled = false; };
+      buttons.append(button);
+    }
+    row.append(buttons); $('#queue-items').append(row);
+  }
+  controls();
+}
 let permissionMode = 'default';
 let selectedModel = 'default';
 function modelState(data) {
@@ -44,7 +67,11 @@ function contextUsage(context) {
   $('#context-usage').classList.toggle('context-high', percent >= 80);
 }
 function controls() {
-  $('#send').disabled = busy || pasting > 0 || capturing || !connected || !project;
+  $('#send').disabled = submitting || pasting > 0 || capturing || !connected || !project;
+  const queueing = busy || !$('#message-queue').hidden;
+  $('#send').title = queueing ? 'Queue message' : 'Send message';
+  $('#send').setAttribute('aria-label', queueing ? 'Queue message' : 'Send message');
+  $('#queue-label').textContent = busy ? 'Queued · sends when Claude finishes' : 'Queue paused · choose Send now to continue';
   $('#capture-game').disabled = capturing || pasting > 0 || attachments.length >= 4;
   $('#stop').hidden = !busy; $('#choose-project').disabled = busy; $('#new-chat').disabled = busy; $('#conversations-open').disabled = busy;
   $('#permission-mode').disabled = busy;
@@ -161,6 +188,7 @@ bridge.onClaude(({ type, data }) => {
   if (type === 'snapshot') {
     draftEpoch++; attachments = []; renderAttachments();
     project = data.project; connected = data.connection.ready; busy = data.busy;
+    renderQueue(data.queued);
     contextUsage(data.context);
     modelState(data);
     permissionMode = data.permissionMode || 'default'; $('#permission-mode').value = permissionMode;
@@ -175,6 +203,7 @@ bridge.onClaude(({ type, data }) => {
     for (const item of data.messages) message(item); scrollToBottom(); controls();
   }
   if (type === 'message') message(data);
+  if (type === 'queue') renderQueue(data);
   if (type === 'model') modelState(data);
   if (type === 'context') contextUsage(data);
   if (type === 'busy') { busy = data; controls(); }
@@ -227,10 +256,16 @@ $('#shortcut').onchange = async event => {
 };
 document.addEventListener('keydown', event => { if (event.key === 'Escape') { if (!$('#settings').hidden) showSettings(false); else action('collapse'); } });
 async function submit() {
-  const text = $('#prompt').value.trim(); if ((!text && !attachments.length) || busy || pasting || capturing) return;
+  const text = $('#prompt').value.trim(); if ((!text && !attachments.length) || submitting || pasting || capturing) return;
   const sent = [...attachments];
-  busy = true; controls(); const result = await claude('send', { text, images: sent.map(({ type, data }) => ({ type, data })) });
-  if (result) { $('#prompt').value = ''; resizePrompt(); attachments = attachments.filter(item => !sent.includes(item)); renderAttachments(); } else { busy = false; controls(); }
+  const originalText = $('#prompt').value, epoch = draftEpoch;
+  submitting = true; controls();
+  const result = await claude('send', { text, images: sent.map(({ type, data }) => ({ type, data })) });
+  if (result && epoch === draftEpoch) {
+    if ($('#prompt').value === originalText) $('#prompt').value = '';
+    resizePrompt(); attachments = attachments.filter(item => !sent.includes(item)); renderAttachments();
+  }
+  submitting = false; controls();
 }
 function resizePrompt() {
   const prompt = $('#prompt');

@@ -10,6 +10,70 @@ function fixture(queryFactory) {
   service.connection = { ready: true }; service.selectProject(root); return { service, events, root };
 }
 async function idle(service) { for (let i = 0; i < 100 && service.busy; i++) await new Promise(r => setTimeout(r, 10)); assert.equal(service.busy, false); }
+function queuedFixture() {
+  const calls = [], releases = [];
+  const fixtureResult = fixture(({ prompt, options }) => (async function* () {
+    calls.push({ prompt, options });
+    yield { type: 'system', session_id: 'queued-session' };
+    await new Promise((resolve, reject) => {
+      releases.push(resolve);
+      if (options.abortController.signal.aborted) reject(new Error('aborted'));
+      else options.abortController.signal.addEventListener('abort', () => reject(new Error('aborted')), { once: true });
+    });
+    yield { type: 'result', subtype: 'success', result: 'Done' };
+  })());
+  return { ...fixtureResult, calls, releases };
+}
+async function waitFor(predicate) {
+  for (let i = 0; i < 100 && !predicate(); i++) await new Promise(resolve => setTimeout(resolve, 5));
+  assert.ok(predicate());
+}
+test('queued messages preserve order, persist, and do not interrupt active work', async () => {
+  const { service, calls, releases, root } = queuedFixture();
+  await service.send('First'); await waitFor(() => releases.length === 1);
+  await service.send('Second'); await service.send('Third');
+  assert.equal(calls.length, 1); assert.equal(calls[0].options.abortController.signal.aborted, false);
+  const restored = new ClaudeService({ storage: service.storage, emit() {} });
+  assert.deepEqual(restored.snapshot().queued.map(item => item.text), ['Second', 'Third']);
+  assert.equal(restored.busy, false);
+  releases[0](); await waitFor(() => releases.length === 2);
+  assert.equal(calls[1].prompt, 'Second'); assert.equal(calls[1].options.resume, 'queued-session');
+  releases[1](); await waitFor(() => releases.length === 3);
+  assert.equal(calls[2].prompt, 'Third'); releases[2](); await idle(service);
+  assert.equal(service.queue().length, 0);
+  fs.rmSync(root, { recursive: true, force: true });
+});
+test('Send now interrupts once, prioritizes the chosen message, and keeps others queued', async () => {
+  const { service, calls, releases, root } = queuedFixture();
+  await service.send('First'); await waitFor(() => releases.length === 1);
+  await service.send('Second'); await service.send('Urgent');
+  const urgent = service.queue()[1].id;
+  await service.sendQueuedNow(urgent); await waitFor(() => releases.length === 2);
+  assert.equal(calls[0].options.abortController.signal.aborted, true);
+  assert.equal(calls[1].prompt, 'Urgent');
+  assert.deepEqual(service.queue().map(item => item.text), ['Second']);
+  service.stop(); await idle(service);
+  assert.equal(calls.length, 2);
+  assert.equal(service.queue().length, 1);
+  service.removeQueued(service.queue()[0].id); assert.equal(service.queue().length, 0);
+  await assert.rejects(service.sendQueuedNow(urgent), /no longer queued/);
+  fs.rmSync(root, { recursive: true, force: true });
+});
+test('failures pause queued screenshots and switching folders keeps queues separate', async () => {
+  let fail;
+  const { service, root } = fixture(() => (async function* () {
+    await new Promise(resolve => { fail = resolve; }); throw new Error('Offline');
+  })());
+  await service.send('First'); await waitFor(() => !!fail);
+  const image = { type: 'image/png', data: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aWQAAAABJRU5ErkJggg==' };
+  await service.send({ text: 'Look', images: [image] });
+  fail(); await idle(service);
+  assert.deepEqual(service.queue()[0].images, [image]);
+  const other = path.join(root, 'other'); fs.mkdirSync(other);
+  service.selectProject(other); assert.equal(service.queue().length, 0);
+  service.selectProject(root); assert.equal(service.queue()[0].text, 'Look');
+  fs.rmSync(root, { recursive: true, force: true });
+});
 test('model selection persists, applies to resumed turns, and reports the actual model', async () => {
   const options = [];
   const { service, root, events } = fixture(args => {

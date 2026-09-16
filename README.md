@@ -19,6 +19,8 @@ Completed tasks and requests for input show a toast while collapsed. Right-click
 
 ## Conversations and projects
 
+You can send messages while Claude is working. They appear in a queue above the composer and run in order after the current task finishes. **Send now** interrupts the current task and sends that message next; **Remove** deletes a queued message. Text and screenshots are saved with the conversation. Stop, errors, or restarting the app leave the queue paused until you choose **Send now**. Queues hold up to ten messages per conversation.
+
 Click the **camera button** beside Send to attach a screenshot of the open World of Warcraft window. The overlay briefly hides during capture and returns with a thumbnail for review; the image is not sent until you press Send. Keep WoW restored in borderless mode. If multiple WoW windows are open, capture requires keeping just one open. Clipboard paste remains available for other images.
 
 **Settings → Model** selects Claude Code default, Fable 5.1, Opus 5, Sonnet 5, or Haiku 4.5 for the next message. The choice persists across restarts and can be changed while Claude is idle. The header shows the selected model until Claude reports the actual model. Availability depends on your Claude account; Fable may use usage credits depending on your plan.

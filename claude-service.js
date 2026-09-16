@@ -15,8 +15,39 @@ class ClaudeService {
     if (!this.data.sessions || typeof this.data.sessions !== 'object') this.data = { project: null, sessions: {} };
   }
   modelState() { return { model: this.data.model || 'default', activeModel: this.session()?.activeModel || null }; }
+  queue() { return this.session()?.queued || []; }
+  queueChanged() { this.emit('queue', this.queue()); }
+  removeQueued(id) {
+    if (this.promoting) throw new Error('Wait for the message to start.');
+    const queue = this.queue(), index = queue.findIndex(item => item.id === id);
+    if (index < 0) throw new Error('That message is no longer queued.');
+    queue.splice(index, 1); this.save(); this.queueChanged();
+  }
+  async sendQueuedNow(id) {
+    if (this.promoting) throw new Error('A message is already being sent.');
+    if (!this.queue().some(item => item.id === id)) throw new Error('That message is no longer queued.');
+    this.promoting = true;
+    this.stop();
+    const token = this.stopToken;
+    try {
+      await this.running;
+      if (token !== this.stopToken) return;
+      const index = this.queue().findIndex(item => item.id === id);
+      if (index < 0) return;
+      const [item] = this.queue().splice(index, 1); this.queue().unshift(item);
+      this.promoting = false;
+      await this.drainQueue();
+    } finally { this.promoting = false; }
+  }
+  async drainQueue() {
+    if (this.busy || this.promoting || !this.queue().length) return;
+    const item = this.queue().shift();
+    try { await this.send(item, true); }
+    catch (error) { this.queue().unshift(item); this.save(); this.emit('failure', { text: error.message }); }
+    this.queueChanged();
+  }
   setModel(model) {
-    if (this.busy) throw new Error('Stop the current task before changing model.');
+    if (this.busy || this.promoting) throw new Error('Stop the current task before changing model.');
     if (!['default', 'claude-fable-5-1', 'claude-opus-5', 'claude-sonnet-5', 'claude-haiku-4-5'].includes(model)) throw new Error('Unknown model.');
     this.data.model = model;
     for (const session of Object.values(this.data.sessions)) session.activeModel = null;
@@ -29,9 +60,9 @@ class ClaudeService {
     this.session().activeModel = model;
     this.emit('model', this.modelState());
   }
-  snapshot() { return { ...this.modelState(), context: this.session()?.context || null, permissionMode: this.data.permissionMode || 'default', project: this.data.project, title: this.session()?.title, messages: this.session()?.messages || [], connection: this.connection, busy: this.busy }; }
+  snapshot() { return { ...this.modelState(), queued: this.queue(), context: this.session()?.context || null, permissionMode: this.data.permissionMode || 'default', project: this.data.project, title: this.session()?.title, messages: this.session()?.messages || [], connection: this.connection, busy: this.busy || !!this.promoting }; }
   setPermissionMode(mode) {
-    if (this.busy) throw new Error('Stop the current task before changing permission mode.');
+    if (this.busy || this.promoting) throw new Error('Stop the current task before changing permission mode.');
     if (!['default', 'auto', 'acceptEdits', 'plan', 'bypassPermissions'].includes(mode)) throw new Error('Unknown permission mode.');
     this.data.permissionMode = mode; this.save();
     return { mode };
@@ -42,7 +73,7 @@ class ClaudeService {
     return sessions.filter(item => item.cwd).map(item => ({ id: item.sessionId, title: item.customTitle || item.summary || 'Untitled conversation', project: item.cwd, modified: item.lastModified }));
   }
   async loadConversation(id) {
-    if (this.busy) throw new Error('Stop the current task before loading a conversation.');
+    if (this.busy || this.promoting) throw new Error('Stop the current task before loading a conversation.');
     if (typeof id !== 'string' || !/^[a-f0-9-]{36}$/i.test(id)) throw new Error('Select a valid conversation.');
     const { getSessionInfo, getSessionMessages } = await import('@anthropic-ai/claude-agent-sdk');
     const info = await getSessionInfo(id);
@@ -54,7 +85,7 @@ class ClaudeService {
       const images = Array.isArray(content) ? content.filter(block => block.type === 'image' && block.source?.type === 'base64' && ['image/png', 'image/jpeg', 'image/webp', 'image/gif'].includes(block.source.media_type)).map(block => ({ type: block.source.media_type, data: block.source.data })) : [];
       return text || images.length ? [{ id: item.uuid, role: item.type === 'user' ? 'You' : 'Claude', text, images, time: null }] : [];
     });
-    if (this.busy) throw new Error('Stop the current task before loading a conversation.');
+    if (this.busy || this.promoting) throw new Error('Stop the current task before loading a conversation.');
     const project = fs.realpathSync(info.cwd);
     this.data.project = project;
     let context = this.data.sessions[project]?.sessionId === id ? this.data.sessions[project].context : null;
@@ -79,14 +110,14 @@ class ClaudeService {
     this.emit('snapshot', this.snapshot()); return this.connection;
   }
   selectProject(project) {
-    if (this.busy) throw new Error('Stop the current task before switching addons.');
+    if (this.busy || this.promoting) throw new Error('Stop the current task before switching addons.');
     if (!fs.statSync(project).isDirectory()) throw new Error('Select an addon folder.');
     this.data.project = fs.realpathSync(project);
     this.data.sessions[this.data.project] ||= { messages: [], sessionId: null };
     this.save(); this.emit('snapshot', this.snapshot());
   }
   newChat() {
-    if (this.busy) throw new Error('Stop the current task before starting a new chat.');
+    if (this.busy || this.promoting) throw new Error('Stop the current task before starting a new chat.');
     if (!this.session()) return;
     this.data.sessions[this.data.project] = { messages: [], sessionId: null };
     this.save(); this.emit('snapshot', this.snapshot());
@@ -115,13 +146,13 @@ class ClaudeService {
     request.finish(allow ? { behavior: 'allow', updatedInput: input } : { behavior: 'deny', message: 'The user declined this action in ClaudeHUD.' });
   }
   stop() {
+    this.stopToken = (this.stopToken || 0) + 1;
     for (const request of [...this.pending.values()]) request.finish({ behavior: 'deny', message: 'Task stopped by user.' });
     this.controller?.abort();
   }
-  async send(payload) {
+  async send(payload, fromQueue = false) {
     const text = typeof payload === 'string' ? payload : payload?.text;
     const images = typeof payload === 'string' ? [] : payload?.images || [];
-    if (this.busy) throw new Error('Claude is already working.');
     if (!this.connection.ready) throw new Error(this.connection.detail);
     if (!this.session()) throw new Error('Choose your addon folder first.');
     if (typeof text !== 'string' || text.length > 12000 || !Array.isArray(images) || images.length > 4 || (!text.trim() && !images.length)) throw new Error('Add a message or up to four screenshots. Text is limited to 12,000 characters.');
@@ -134,6 +165,14 @@ class ClaudeService {
       if (!valid) throw new Error('The pasted image is not a valid supported image file.');
       return { type: image.type, data: image.data };
     });
+    if (!fromQueue && (this.busy || this.promoting || this.queue().length)) {
+      const queue = this.session().queued ||= [];
+      if (queue.length >= 10) throw new Error('The queue is full. Remove a queued message or wait for Claude.');
+      const item = { id: randomUUID(), text: text.trim(), images: validated };
+      queue.push(item);
+      try { this.save(); } catch (error) { queue.pop(); throw error; }
+      this.queueChanged(); return { queued: true };
+    }
     this.busy = true; this.controller = new AbortController();
     this.add('You', text.trim(), randomUUID(), validated);
     try { this.save(); } catch (error) { this.busy = false; this.controller = null; throw error; }
@@ -144,7 +183,7 @@ class ClaudeService {
     this.running = this.run(prompt);
   }
   async run(prompt) {
-    let stream, current, finalReceived = false;
+    let stream, current, finalReceived = false, succeeded = false;
     try {
       const query = this.queryFactory || (await import('@anthropic-ai/claude-agent-sdk')).query;
       const options = {
@@ -192,20 +231,24 @@ class ClaudeService {
           this.emit('context', this.session().context);
           finalReceived = true;
           if (event.is_error || event.subtype !== 'success') throw new Error(event.errors?.join('\n') || event.result || 'Claude could not finish this task.');
-          this.emit('complete', { text: event.result || 'Claude finished.' });
+          succeeded = true;
+          if (!this.queue().length) this.emit('complete', { text: event.result || 'Claude finished.' });
         }
       }
       if (!finalReceived && !this.controller.signal.aborted) throw new Error('Claude disconnected before finishing. You can retry your message.');
     } catch (error) {
+      succeeded = false;
       const stopped = this.controller.signal.aborted;
       this.add('System', stopped ? 'Task stopped. Changes already made remain in your addon folder.' : `Claude error: ${error.message}`);
       this.emit(stopped ? 'stopped' : 'failure', { text: stopped ? 'Task stopped' : error.message });
     } finally {
+      const continueQueue = succeeded && !this.controller.signal.aborted && !this.promoting;
       try { stream?.close?.(); } catch { /* The process may already have exited. */ }
       for (const request of [...this.pending.values()]) request.finish({ behavior: 'deny', message: 'Task ended.' });
       this.busy = false; this.controller = null;
       try { this.save(); } catch (error) { this.emit('failure', { text: `Could not save conversation: ${error.message}` }); }
       this.emit('busy', false);
+      if (continueQueue) await this.drainQueue();
     }
   }
 }
