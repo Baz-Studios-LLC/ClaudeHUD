@@ -19,6 +19,8 @@ Completed tasks and requests for input show a toast while collapsed. Right-click
 
 ## Conversations and projects
 
+**Settings → Show thinking** displays collapsible thinking summaries when Claude Code provides them. It is off by default and persists between sessions. Enabling it requests summaries on the next message; existing saved summaries can be shown or hidden immediately. Availability and detail depend on the model and Claude Code output.
+
 You can send messages while Claude is working. They appear in a queue above the composer and run in order after the current task finishes. **Send now** interrupts the current task and sends that message next; **Remove** deletes a queued message. Text and screenshots are saved with the conversation. Stop, errors, or restarting the app leave the queue paused until you choose **Send now**. Queues hold up to ten messages per conversation.
 
 Click the **camera button** beside Send to attach a screenshot of the open World of Warcraft window. The overlay briefly hides during capture and returns with a thumbnail for review; the image is not sent until you press Send. Keep WoW restored in borderless mode. If multiple WoW windows are open, capture requires keeping just one open. Clipboard paste remains available for other images.
@@ -52,7 +54,7 @@ The overlay uses an always-on-top Electron window without injecting into WoW. Th
 
 ## Updates and releases
 
-Installed copies check GitHub Releases after startup and every four hours. Updates download automatically. **Settings → Restart to update** installs a downloaded update when Claude is idle; **Check for updates** is also available in the tray menu. Updates never install automatically on quit.
+Installed copies check GitHub Releases after startup and every four hours. Updates download automatically. Once downloaded, an **Update ready** chip appears in the expanded header. Click it while Claude is idle to install silently and relaunch ClaudeHUD. **Settings → Restart to update** uses the same silent installation; **Check for updates** is also available in the tray menu. Updates never install automatically on quit. Upgrading from an older build may show its installer wizard once before this behavior takes effect.
 
 Build a Windows installer locally with `npm run dist -- --publish never`. To release, bump the version in `package.json` and the lockfile, commit, and push a matching `vX.Y.Z` tag. The Windows release workflow tests and builds the installer, blockmap, and `latest.yml`, uploads them to a draft release, and then publishes it. The workflow uses GitHub's temporary Actions token, never a credential bundled in the app.
 

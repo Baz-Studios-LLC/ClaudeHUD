@@ -7,7 +7,8 @@ const { promisify } = require('node:util');
 const { latestContext, withContextLimit } = require('./context-usage');
 
 class ClaudeService {
-  constructor({ storage, emit, queryFactory }) {
+  constructor({ storage, emit, queryFactory, showThinking = () => false }) {
+    this.showThinking = showThinking;
     this.storage = storage; this.emit = emit; this.queryFactory = queryFactory;
     this.data = { project: null, sessions: {} }; this.pending = new Map(); this.busy = false;
     this.connection = { ready: false, detail: 'Checking Claude Code…' };
@@ -81,9 +82,10 @@ class ClaudeService {
     const history = await getSessionMessages(id);
     const messages = history.filter(item => !item.parent_tool_use_id && ['user', 'assistant'].includes(item.type)).flatMap(item => {
       const content = item.message?.content;
+      const thinking = item.type === 'assistant' && Array.isArray(content) ? content.filter(block => block.type === 'thinking' && typeof block.thinking === 'string').map(block => block.thinking).join('\n\n') : '';
       const text = typeof content === 'string' ? content : Array.isArray(content) ? content.filter(block => block.type === 'text').map(block => block.text).join('\n') : '';
       const images = Array.isArray(content) ? content.filter(block => block.type === 'image' && block.source?.type === 'base64' && ['image/png', 'image/jpeg', 'image/webp', 'image/gif'].includes(block.source.media_type)).map(block => ({ type: block.source.media_type, data: block.source.data })) : [];
-      return text || images.length ? [{ id: item.uuid, role: item.type === 'user' ? 'You' : 'Claude', text, images, time: null }] : [];
+      return text || images.length || thinking ? [{ id: item.uuid, role: item.type === 'user' ? 'You' : 'Claude', text, images, thinking, time: null }] : [];
     });
     if (this.busy || this.promoting) throw new Error('Stop the current task before loading a conversation.');
     const project = fs.realpathSync(info.cwd);
@@ -200,6 +202,7 @@ class ClaudeService {
       };
       if (this.session().sessionId) options.resume = this.session().sessionId;
       if (this.data.model && this.data.model !== 'default') options.model = this.data.model;
+      if (this.showThinking()) options.thinking = { type: 'enabled', display: 'summarized' };
       stream = query({ prompt, options });
       for await (const event of stream) {
         if (event.session_id) this.session().sessionId = event.session_id;
@@ -210,6 +213,10 @@ class ClaudeService {
         if (event.type === 'stream_event') {
           const part = event.event;
           if (part.type === 'message_start') current = null;
+          if (!event.parent_tool_use_id && part.type === 'content_block_delta' && part.delta.type === 'thinking_delta') {
+            current ||= this.add('Claude', ''); current.thinking = (current.thinking || '') + part.delta.thinking;
+            this.emit('message', { ...current });
+          }
           if (part.type === 'content_block_delta' && part.delta.type === 'text_delta') {
             current ||= this.add('Claude', ''); current.text += part.delta.text;
             this.emit('message', { ...current });
@@ -222,7 +229,13 @@ class ClaudeService {
             this.emit('context', this.session().context);
           }
           const text = event.message.content.filter(x => x.type === 'text').map(x => x.text).join('\n');
-          if (text) { if (current) { current.text = text; this.emit('message', { ...current }); } else this.add('Claude', text); }
+          const thinking = !event.parent_tool_use_id ? event.message.content.filter(x => x.type === 'thinking' && typeof x.thinking === 'string').map(x => x.thinking).join('\n\n') : '';
+          if (text || thinking || current) {
+            current ||= this.add('Claude', text);
+            current.text = text;
+            if (thinking) current.thinking = thinking;
+            this.emit('message', { ...current });
+          }
           current = null;
           for (const block of event.message.content) if (block.type === 'tool_use') this.emit('activity', `${block.name}${block.input?.file_path ? ': ' + path.basename(block.input.file_path) : ''}`);
         }

@@ -182,13 +182,13 @@ app.whenReady().then(async () => {
   panel.webContents.send('preferences', saved);
   panel.webContents.send('expansion', { expanded, transitioning: false });
   setupTray(); sendState(); if (expanded) panel.show(); else panel.showInactive();
-  updates = createUpdater({ app, updater: require('electron-updater').autoUpdater, isBusy: () => !!claude?.busy, emit: value => {
+  updates = createUpdater({ app, updater: require('electron-updater').autoUpdater, isBusy: () => !!(claude?.busy || claude?.promoting || capturing), emit: value => {
     panel.webContents.send('update-status', value);
     if (value.phase === 'ready') notify('ClaudeHUD update ready', 'Open Settings to restart and install.');
   } });
   updates.start();
   if (!smoke) {
-    claude = new ClaudeService({ storage: path.join(app.getPath('userData'), 'conversations.json'), emit: claudeEvent });
+    claude = new ClaudeService({ storage: path.join(app.getPath('userData'), 'conversations.json'), emit: claudeEvent, showThinking: () => preferences.value.showThinking });
     panel.webContents.send('claude-event', { type: 'snapshot', data: claude.snapshot() });
     void claude.connect();
   }
@@ -201,6 +201,20 @@ app.whenReady().then(async () => {
       await new Promise(resolve => setTimeout(resolve, 500));
       const result = await panel.webContents.executeJavaScript(`({messages: document.querySelectorAll('.message').length, ready: document.querySelector('#status-label').textContent, text: document.querySelector('#messages').textContent})`);
       if (result.messages !== 1 || !result.text.includes('Connected UI test response') || !result.text.includes('Allow Write?')) throw new Error(JSON.stringify(result));
+      panel.webContents.send('claude-event', { type: 'message', data: { id: 'thinking-test', role: 'Claude', text: '', thinking: 'Checking the addon layout.' } });
+      await new Promise(resolve => setTimeout(resolve, 100));
+      const thinkingResult = await panel.webContents.executeJavaScript(`(() => {
+        const block = document.querySelector('.thinking');
+        const toggle = document.querySelector('#show-thinking');
+        const hidden = getComputedStyle(block).display === 'none';
+        toggle.checked = true; toggle.dispatchEvent(new Event('change'));
+        const shown = getComputedStyle(block).display !== 'none';
+        block.open = false;
+        const collapsed = !block.open;
+        toggle.checked = false; toggle.dispatchEvent(new Event('change'));
+        return hidden && shown && collapsed && getComputedStyle(block).display === 'none';
+      })()`);
+      if (!thinkingResult) throw new Error('Thinking visibility toggle failed');
       const codeResult = await panel.webContents.executeJavaScript(`(async () => {
         const block = document.querySelector('.code-block');
         const copy = block.querySelector('button'); copy.click();
@@ -208,15 +222,21 @@ app.whenReady().then(async () => {
         return { text: block.querySelector('code').textContent, label: copy.textContent, unsafe: !!block.querySelector('script') };
       })()`);
       if (codeResult.text !== '  print("Hello, Azeroth!")\n-- <script> stays literal\n' || codeResult.label !== 'Copied!' || codeResult.unsafe || smokeCopiedCode !== codeResult.text) throw new Error('Code formatting/copy failed');
+      panel.webContents.send('update-status', { phase: 'downloading', version: app.getVersion(), detail: 'Downloading…' });
+      await new Promise(resolve => setTimeout(resolve, 100));
+      if (!await panel.webContents.executeJavaScript(`document.querySelector('#update-ready').hidden`)) throw new Error('Update chip appeared before download finished');
+      panel.webContents.send('update-status', { phase: 'ready', version: app.getVersion(), nextVersion: '0.1.10', detail: 'Update downloaded.' });
       panel.webContents.send('claude-event', { type: 'busy', data: true });
       panel.webContents.send('claude-event', { type: 'queue', data: [{ id: 'queue-test', text: 'Also check the minimap button spacing.', images: [] }] });
       await new Promise(resolve => setTimeout(resolve, 100));
       const queueResult = await panel.webContents.executeJavaScript(`({ visible: !document.querySelector('#message-queue').hidden, enabled: !document.querySelector('#send').disabled, label: document.querySelector('#send').getAttribute('aria-label'), actions: [...document.querySelectorAll('.queued-actions button')].map(button => button.textContent) })`);
       if (!queueResult.visible || !queueResult.enabled || queueResult.label !== 'Queue message' || queueResult.actions.join(',') !== 'Send now,Remove') throw new Error('Queue controls failed');
+      if (!await panel.webContents.executeJavaScript(`!document.querySelector('#update-ready').hidden && document.querySelector('#update-ready').disabled`)) throw new Error('Update chip must wait while Claude works');
       fs.writeFileSync(path.join(__dirname, 'artifacts', 'queue.png'), (await panel.webContents.capturePage()).toPNG());
       panel.webContents.send('claude-event', { type: 'queue', data: [] });
       panel.webContents.send('claude-event', { type: 'busy', data: false });
       await new Promise(resolve => setTimeout(resolve, 100));
+      if (!await panel.webContents.executeJavaScript(`!document.querySelector('#update-ready').hidden && !document.querySelector('#update-ready').disabled`)) throw new Error('Update chip did not become available');
       fs.writeFileSync(path.join(__dirname, 'artifacts', 'panel.png'), (await panel.webContents.capturePage()).toPNG());
       await panel.webContents.executeJavaScript(`document.querySelector('#settings-toggle').click()`);
       await new Promise(resolve => setTimeout(resolve, 150));
@@ -317,6 +337,7 @@ ipcMain.handle('action', async (event, action, value) => {
   if (action === 'install-update') return updates?.install();
   if (action === 'opacity' && Number.isFinite(value)) { panel.setOpacity(Math.max(.8, Math.min(1, value))); if (!smoke) preferences.update({ opacity: value }); }
   if (action === 'sound' && typeof value === 'boolean' && !smoke) preferences.update({ sound: value });
+  if (action === 'show-thinking' && typeof value === 'boolean' && !smoke) preferences.update({ showThinking: value });
   if (action === 'settings-view' && typeof value === 'boolean' && !smoke) preferences.update({ settingsOpen: value });
   if (action === 'shortcut') return bindShortcut(value);
   if (action === 'status' && ['Ready', 'Working', 'Finished'].includes(value)) { state = value; sendState(); }

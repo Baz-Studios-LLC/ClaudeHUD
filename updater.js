@@ -24,7 +24,7 @@ function createUpdater({ app, updater, emit, isBusy }) {
     install() {
       if (isBusy()) return { error: 'Wait for Claude to finish, or stop the current task before restarting.' };
       if (state.phase !== 'ready') return { error: 'No downloaded update is ready.' };
-      if (!installing) { installing = true; updater.quitAndInstall(false, true); }
+      if (!installing) { installing = true; updater.quitAndInstall(true, true); }
       return { ok: true };
     },
     dispose() { clearTimeout(startup); clearInterval(interval); }

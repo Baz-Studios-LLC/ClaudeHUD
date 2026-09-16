@@ -10,6 +10,32 @@ function fixture(queryFactory) {
   service.connection = { ready: true }; service.selectProject(root); return { service, events, root };
 }
 async function idle(service) { for (let i = 0; i < 100 && service.busy; i++) await new Promise(r => setTimeout(r, 10)); assert.equal(service.busy, false); }
+test('thinking summaries stream, reconcile without duplicates, and survive restart', async () => {
+  let options;
+  const { service, events, root } = fixture(args => {
+    options = args.options;
+    return (async function* () {
+      yield { type: 'stream_event', event: { type: 'message_start' } };
+      yield { type: 'stream_event', event: { type: 'content_block_delta', delta: { type: 'thinking_delta', thinking: 'Checking the layout.' } } };
+      yield { type: 'stream_event', event: { type: 'content_block_delta', delta: { type: 'text_delta', text: 'Fixed.' } } };
+      yield { type: 'assistant', message: { content: [{ type: 'thinking', thinking: 'Checking the layout.', signature: 'not-for-display' }, { type: 'redacted_thinking', data: 'not-for-display' }, { type: 'text', text: 'Fixed.' }] } };
+      yield { type: 'result', subtype: 'success', result: 'Fixed.' };
+    })();
+  });
+  service.showThinking = () => true;
+  await service.send('Fix the layout'); await idle(service);
+  assert.deepEqual(options.thinking, { type: 'enabled', display: 'summarized' });
+  const messages = service.session().messages.filter(item => item.role === 'Claude');
+  assert.equal(messages.length, 1); assert.equal(messages[0].text, 'Fixed.');
+  assert.equal(messages[0].thinking, 'Checking the layout.');
+  assert.ok(events.some(event => event.type === 'message' && event.data.thinking === 'Checking the layout.'));
+  assert.ok(!JSON.stringify(messages).includes('not-for-display'));
+  const restored = new ClaudeService({ storage: service.storage, emit() {} });
+  assert.equal(restored.session().messages[1].thinking, 'Checking the layout.');
+  service.showThinking = () => false;
+  await service.send('Again'); await idle(service); assert.equal(options.thinking, undefined);
+  fs.rmSync(root, { recursive: true, force: true });
+});
 function queuedFixture() {
   const calls = [], releases = [];
   const fixtureResult = fixture(({ prompt, options }) => (async function* () {

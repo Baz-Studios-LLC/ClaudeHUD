@@ -7,7 +7,7 @@ const { Preferences, normalize, fitBounds } = require('./preferences');
 test('settings survive a fresh instance including compact state and expanded dimensions', () => {
   const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'hud-prefs-')), 'preferences.json');
   const prefs = new Preferences(file);
-  const changes = { opacity: .85, sound: true, shortcut: 'Alt+Shift+C', expanded: false, settingsOpen: true, bounds: { x: -800, y: 60, width: 500, height: 700 } };
+  const changes = { opacity: .85, sound: true, showThinking: true, shortcut: 'Alt+Shift+C', expanded: false, settingsOpen: true, bounds: { x: -800, y: 60, width: 500, height: 700 } };
   prefs.update(changes); assert.deepEqual(new Preferences(file).value, changes);
   prefs.update({ sound: false }); assert.equal(new Preferences(file).value.opacity, .85);
 });

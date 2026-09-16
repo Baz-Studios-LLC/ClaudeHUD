@@ -76,6 +76,9 @@ function controls() {
   $('#stop').hidden = !busy; $('#choose-project').disabled = busy; $('#new-chat').disabled = busy; $('#conversations-open').disabled = busy;
   $('#permission-mode').disabled = busy;
   $('#model-picker').disabled = busy;
+  $('#update-ready').disabled = busy;
+  $('#install-update').disabled = busy;
+  $('#update-ready').title = busy ? 'Update downloaded. Wait for Claude to finish.' : 'Install downloaded update and restart ClaudeHUD';
   $('#permission-mode').title = busy ? 'Stop the current task to change mode' : modeDescriptions[permissionMode];
 }
 function renderMessageText(container, text) {
@@ -132,6 +135,15 @@ function message(item) {
     }
   }
   renderMessageText(body.querySelector('.response-text'), item.text);
+  let thinking = body.querySelector('.thinking');
+  if (item.thinking && !thinking) {
+    thinking = document.createElement('details'); thinking.className = 'thinking'; thinking.open = true;
+    const summary = document.createElement('summary'); summary.textContent = 'Thinking';
+    const content = document.createElement('div'); content.className = 'thinking-content';
+    thinking.append(summary, content); body.insertBefore(thinking, body.querySelector('.response-text'));
+  }
+  if (thinking) thinking.querySelector('.thinking-content').textContent = item.thinking || '';
+  body.closest('.message').classList.toggle('thinking-only', !!item.thinking && !item.text && !item.images?.length);
   if (nearBottom || item.role === 'You') scrollToBottom();
 }
 function localError(text) { message({ id: crypto.randomUUID(), role: 'System', text, time: Date.now() }); scrollToBottom(); }
@@ -236,6 +248,7 @@ bridge.onExpansion(({ expanded, transitioning }) => {
 });
 bridge.onSettings(() => showSettings(true));
 bridge.onPreferences(value => {
+  $('#show-thinking').checked = !!value.showThinking; document.body.classList.toggle('show-thinking', !!value.showThinking);
   $('#opacity').value = Math.round(value.opacity * 100); $('#sound').checked = value.sound;
   $('#shortcut').value = value.shortcut;
   showSettings(value.settingsOpen, false);
@@ -250,6 +263,10 @@ $('#new-chat').onclick = () => claude('new-chat');
 $('#stop').onclick = () => claude('stop');
 $('#opacity').oninput = event => action('opacity', Number(event.target.value) / 100);
 $('#sound').onchange = () => { action('sound', $('#sound').checked); if ($('#sound').checked) { audio ||= new AudioContext(); audio.resume(); } };
+$('#show-thinking').onchange = () => {
+  const enabled = $('#show-thinking').checked;
+  document.body.classList.toggle('show-thinking', enabled); action('show-thinking', enabled);
+};
 document.addEventListener('pointerdown', () => { if ($('#sound').checked) { audio ||= new AudioContext(); audio.resume(); } });
 $('#shortcut').onchange = async event => {
   const ok = await action('shortcut', event.target.value); $('#settings-note').textContent = ok ? 'Shortcut updated.' : 'That shortcut is unavailable. Try another.';
@@ -338,10 +355,18 @@ $('#model-picker').onchange = async event => {
 bridge.onUpdate(value => {
   $('#update-status').textContent = `ClaudeHUD ${value.version} · ${value.detail}`;
   $('#install-update').hidden = value.phase !== 'ready';
+  $('#update-ready').hidden = value.phase !== 'ready';
+  $('#update-ready').setAttribute('aria-label', value.nextVersion ? `Install ClaudeHUD ${value.nextVersion} and restart` : 'Install update and restart');
+  controls();
   $('#check-updates').disabled = ['development', 'checking', 'downloading'].includes(value.phase);
 });
 $('#check-updates').onclick = () => action('check-updates');
-$('#install-update').onclick = async () => { const result = await action('install-update'); if (result?.error) $('#update-status').textContent = result.error; };
+async function installUpdate() {
+  const result = await action('install-update');
+  if (result?.error) { $('#update-status').textContent = result.error; localError(result.error); }
+}
+$('#install-update').onclick = installUpdate;
+$('#update-ready').onclick = installUpdate;
 let conversations = [];
 function renderConversations() {
   const search = $('#conversation-search').value.toLowerCase();
