@@ -19,6 +19,8 @@ Completed tasks and requests for input show a toast while collapsed. Right-click
 
 ## Conversations and projects
 
+The square button between Settings and Close maximizes the overlay; click it again to restore the previous size. **F11** or **Settings → Full screen** fills the monitor, including the taskbar area. **Escape** exits full screen first. Window mode is remembered between sessions, and collapsing still returns to the small HUD.
+
 **Settings → Show thinking** displays collapsible thinking summaries when Claude Code provides them. It is off by default and persists between sessions. Enabling it requests summaries on the next message; existing saved summaries can be shown or hidden immediately. Availability and detail depend on the model and Claude Code output.
 
 You can send messages while Claude is working. They appear in a queue above the composer and run in order after the current task finishes. **Send now** interrupts the current task and sends that message next; **Remove** deletes a queued message. Text and screenshots are saved with the conversation. Stop, errors, or restarting the app leave the queue paused until you choose **Send now**. Queues hold up to ten messages per conversation.

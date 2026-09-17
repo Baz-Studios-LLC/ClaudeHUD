@@ -213,11 +213,11 @@ class ClaudeService {
         if (event.type === 'stream_event') {
           const part = event.event;
           if (part.type === 'message_start') current = null;
-          if (!event.parent_tool_use_id && part.type === 'content_block_delta' && part.delta.type === 'thinking_delta') {
+          if (!event.parent_tool_use_id && part.type === 'content_block_delta' && part.delta.type === 'thinking_delta' && part.delta.thinking) {
             current ||= this.add('Claude', ''); current.thinking = (current.thinking || '') + part.delta.thinking;
             this.emit('message', { ...current });
           }
-          if (part.type === 'content_block_delta' && part.delta.type === 'text_delta') {
+          if (part.type === 'content_block_delta' && part.delta.type === 'text_delta' && part.delta.text) {
             current ||= this.add('Claude', ''); current.text += part.delta.text;
             this.emit('message', { ...current });
           }

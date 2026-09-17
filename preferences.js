@@ -7,6 +7,7 @@ function normalize(value = {}) {
   return { shortcut: shortcuts.includes(value.shortcut) ? value.shortcut : shortcuts[0],
     opacity: Number.isFinite(value.opacity) ? Math.max(.8, Math.min(1, value.opacity)) : 1,
     sound: value.sound === true, showThinking: value.showThinking === true, expanded: value.expanded !== false, settingsOpen: value.settingsOpen === true,
+    windowMode: ['normal', 'maximized', 'fullscreen'].includes(value.windowMode) ? value.windowMode : 'normal',
     bounds: bounds && ['x', 'y', 'width', 'height'].every(key => Number.isFinite(bounds[key])) ? { x: Math.round(bounds.x), y: Math.round(bounds.y), width: Math.max(380, Math.round(bounds.width)), height: Math.max(520, Math.round(bounds.height)) } : null };
 }
 class Preferences {

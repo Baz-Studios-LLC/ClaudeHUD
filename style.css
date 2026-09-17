@@ -114,6 +114,9 @@ kbd{font:inherit;color:#c4beb2}
 .window-actions #update-ready{width:auto;padding:0 8px;height:26px;align-self:center;font-size:9px;font-weight:600;background:#3c3025;border:1px solid #966449;color:#efb9a2;white-space:nowrap}
 .window-actions #update-ready:hover:not(:disabled){background:#51392a}
 .window-actions #update-ready:disabled{opacity:.55}
+.window-actions #maximize{display:grid;place-items:center;padding:0}
+.window-filled .panel{border-radius:0}
+.window-filled .titlebar{-webkit-app-region:no-drag}
 .collapsed .model-label,.collapsed #settings-toggle,.collapsed #close-app{display:none}
 .collapsed .window-actions{display:none}
 .collapsed .panel> :not(.titlebar){visibility:hidden;pointer-events:none}

@@ -4,6 +4,15 @@ for (const name of ['panel', 'toast']) $(`#${name}`).hidden = name !== surface;
 const bridge = window.hud;
 const action = (name, value) => bridge.action(name, value);
 let busy = false, audio, project, connected = false;
+let windowMode = 'normal';
+bridge.onWindowMode(mode => {
+  windowMode = mode;
+  document.body.classList.toggle('window-filled', mode !== 'normal');
+  $('#maximize').title = mode === 'normal' ? 'Maximize' : 'Restore window';
+  $('#maximize').setAttribute('aria-label', $('#maximize').title);
+  $('#maximize path').setAttribute('d', mode === 'normal' ? 'M5 5h14v14H5z' : 'M8 8h11v11H8z M5 15V5h10');
+  $('#fullscreen-toggle').textContent = mode === 'fullscreen' ? 'Exit full screen (F11)' : 'Full screen (F11)';
+});
 let submitting = false;
 function renderQueue(items = []) {
   $('#message-queue').hidden = !items.length;
@@ -135,15 +144,19 @@ function message(item) {
     }
   }
   renderMessageText(body.querySelector('.response-text'), item.text);
+  const hasText = typeof item.text === 'string' && !!item.text.trim();
+  const hasThinking = typeof item.thinking === 'string' && !!item.thinking.trim();
+  const hasImages = !!item.images?.length;
   let thinking = body.querySelector('.thinking');
-  if (item.thinking && !thinking) {
+  if (hasThinking && !thinking) {
     thinking = document.createElement('details'); thinking.className = 'thinking'; thinking.open = true;
     const summary = document.createElement('summary'); summary.textContent = 'Thinking';
     const content = document.createElement('div'); content.className = 'thinking-content';
     thinking.append(summary, content); body.insertBefore(thinking, body.querySelector('.response-text'));
   }
-  if (thinking) thinking.querySelector('.thinking-content').textContent = item.thinking || '';
-  body.closest('.message').classList.toggle('thinking-only', !!item.thinking && !item.text && !item.images?.length);
+  if (thinking) { thinking.hidden = !hasThinking; thinking.querySelector('.thinking-content').textContent = item.thinking || ''; }
+  body.closest('.message').hidden = !hasText && !hasThinking && !hasImages;
+  body.closest('.message').classList.toggle('thinking-only', hasThinking && !hasText && !hasImages);
   if (nearBottom || item.role === 'You') scrollToBottom();
 }
 function localError(text) { message({ id: crypto.randomUUID(), role: 'System', text, time: Date.now() }); scrollToBottom(); }
@@ -255,6 +268,8 @@ bridge.onPreferences(value => {
 });
 bridge.onShortcut(ok => { if (!ok) $('#settings-note').textContent = 'Hotkey unavailable. Choose another shortcut in settings.'; });
 $('#close-app').onclick = () => action('quit'); $('#overlay-toggle').onclick = () => action('toggle');
+$('#maximize').onclick = () => action('maximize');
+$('#fullscreen-toggle').onclick = () => action('fullscreen');
 $('#toast').onclick = () => action('open');
 $('#settings-toggle').onclick = () => showSettings($('#settings').hidden);
 $('#settings-close').onclick = () => showSettings(false); $('#quit').onclick = () => action('quit');
@@ -271,7 +286,14 @@ document.addEventListener('pointerdown', () => { if ($('#sound').checked) { audi
 $('#shortcut').onchange = async event => {
   const ok = await action('shortcut', event.target.value); $('#settings-note').textContent = ok ? 'Shortcut updated.' : 'That shortcut is unavailable. Try another.';
 };
-document.addEventListener('keydown', event => { if (event.key === 'Escape') { if (!$('#settings').hidden) showSettings(false); else action('collapse'); } });
+document.addEventListener('keydown', event => {
+  if (event.key === 'F11') { event.preventDefault(); if (!event.repeat) action('fullscreen'); }
+  if (event.key === 'Escape') {
+    if (windowMode === 'fullscreen') action('exit-fullscreen');
+    else if (!$('#settings').hidden) showSettings(false);
+    else action('collapse');
+  }
+});
 async function submit() {
   const text = $('#prompt').value.trim(); if ((!text && !attachments.length) || submitting || pasting || capturing) return;
   const sent = [...attachments];

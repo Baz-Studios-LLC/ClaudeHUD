@@ -9,10 +9,26 @@ let panel, toast, timer, tray;
 let claude;
 let updates;
 let preferences, savePositionTimer;
+let windowMode = 'normal', normalBounds, sizingWindow = false;
+function sendWindowMode() { panel.webContents.send('window-mode', expanded ? windowMode : 'normal'); }
+function applyWindowMode() {
+  sizingWindow = true;
+  try {
+    const display = screen.getDisplayMatching(normalBounds || panel.getBounds());
+    const bounds = windowMode === 'fullscreen' ? display.bounds : windowMode === 'maximized' ? display.workArea : fitBounds(normalBounds, display.workArea);
+    panel.setBounds(bounds); panel.setResizable(windowMode === 'normal');
+  } finally { sizingWindow = false; }
+  sendWindowMode();
+}
+function setWindowMode(mode) {
+  if (!expanded || transitioning || capturing || !['normal', 'maximized', 'fullscreen'].includes(mode)) return;
+  if (windowMode === 'normal') normalBounds = panel.getBounds();
+  windowMode = mode; applyWindowMode(); saveWindow();
+}
 function saveWindow() {
   if (smoke || !preferences || !panel || panel.isDestroyed()) return;
-  const bounds = panel.getBounds();
-  preferences.update({ expanded, bounds: { x: bounds.x, y: bounds.y, ...expandedSize } });
+  const bounds = expanded && windowMode !== 'normal' ? normalBounds : panel.getBounds();
+  preferences.update({ expanded, windowMode, bounds: { x: bounds.x, y: bounds.y, ...expandedSize } });
 }
 function scheduleSaveWindow() { if (transitioning) return; clearTimeout(savePositionTimer); savePositionTimer = setTimeout(saveWindow, 200); }
 let nativeDialogOpen = false;
@@ -65,6 +81,9 @@ function setExpanded(next) {
   clearInterval(transitionTimer);
   if (finishTransition) finishTransition();
   transitioning = true;
+  if (!next && windowMode !== 'normal') {
+    sizingWindow = true; panel.setBounds(normalBounds); sizingWindow = false;
+  }
   const start = panel.getBounds();
   expanded = next;
   toast.hide();
@@ -92,6 +111,11 @@ function setExpanded(next) {
         panel.setResizable(next);
         if (next) panel.setMinimumSize(380, 520);
         transitioning = false;
+        if (next) {
+          normalBounds = panel.getBounds();
+          if (windowMode !== 'normal') applyWindowMode();
+        }
+        sendWindowMode();
         saveWindow();
         panel.webContents.send('expansion', { expanded: next, transitioning: false });
         if (next) { panel.focus(); panel.webContents.send('focus-input'); }
@@ -152,6 +176,7 @@ app.whenReady().then(async () => {
   const area = saved.bounds ? screen.getDisplayMatching(saved.bounds).workArea : screen.getPrimaryDisplay().workArea;
   const bounds = fitBounds(saved.bounds || { width: 460, height: Math.min(740, area.height - 40), x: area.x + area.width - 488, y: area.y + 20 }, area);
   expandedSize = { width: bounds.width, height: bounds.height }; expanded = saved.expanded; shortcut = saved.shortcut;
+  normalBounds = bounds; windowMode = saved.windowMode;
   const size = expanded ? expandedSize : compactSize;
   panel = new BrowserWindow({ ...windowOptions(size.width, size.height), minWidth: expanded ? 380 : compactSize.width, minHeight: expanded ? 520 : compactSize.height, resizable: expanded, focusable: expanded, x: bounds.x, y: bounds.y });
   panel.setOpacity(saved.opacity);
@@ -159,11 +184,11 @@ app.whenReady().then(async () => {
   panel.on('blur', () => {
     if (!smoke) void collapseOnBlur();
   });
-  panel.on('resize', () => { if (expanded && !transitioning) { const bounds = panel.getBounds(); expandedSize = { width: bounds.width, height: bounds.height }; scheduleSaveWindow(); } });
+  panel.on('resize', () => { if (expanded && !transitioning && !sizingWindow && windowMode === 'normal') { const bounds = panel.getBounds(); normalBounds = bounds; expandedSize = { width: bounds.width, height: bounds.height }; scheduleSaveWindow(); } });
   panel.on('move', scheduleSaveWindow);
   // Reserve room for the expanded panel when dragging its compact header.
   panel.on('will-move', (event, bounds) => {
-    if (transitionTimer) { event.preventDefault(); return; }
+    if (transitionTimer || (expanded && windowMode !== 'normal')) { event.preventDefault(); return; }
     const work = screen.getDisplayMatching(bounds).workArea;
     const x = Math.max(work.x, Math.min(bounds.x, work.x + work.width - expandedSize.width));
     const y = Math.max(work.y, Math.min(bounds.y, work.y + work.height - expandedSize.height));
@@ -181,6 +206,7 @@ app.whenReady().then(async () => {
   panel.webContents.send('shortcut-status', registered);
   panel.webContents.send('preferences', saved);
   panel.webContents.send('expansion', { expanded, transitioning: false });
+  if (expanded && windowMode !== 'normal') applyWindowMode(); else sendWindowMode();
   setupTray(); sendState(); if (expanded) panel.show(); else panel.showInactive();
   updates = createUpdater({ app, updater: require('electron-updater').autoUpdater, isBusy: () => !!(claude?.busy || claude?.promoting || capturing), emit: value => {
     panel.webContents.send('update-status', value);
@@ -215,6 +241,17 @@ app.whenReady().then(async () => {
         return hidden && shown && collapsed && getComputedStyle(block).display === 'none';
       })()`);
       if (!thinkingResult) throw new Error('Thinking visibility toggle failed');
+      panel.webContents.send('claude-event', { type: 'message', data: { id: 'empty-test', role: 'Claude', text: '\n  ', thinking: ' ' } });
+      panel.webContents.send('claude-event', { type: 'message', data: { id: 'thinking-test', role: 'Claude', text: '\n ', thinking: 'Checking the addon layout.' } });
+      await new Promise(resolve => setTimeout(resolve, 100));
+      const blankRowsHidden = await panel.webContents.executeJavaScript(`(() => {
+        const rows = [...document.querySelectorAll('.message')];
+        return rows.filter(row => getComputedStyle(row).display !== 'none').length === 1;
+      })()`);
+      if (!blankRowsHidden) throw new Error('Blank or hidden-thinking rows are visible');
+      panel.webContents.send('claude-event', { type: 'message', data: { id: 'empty-test', role: 'Claude', text: 'Streaming content arrived.' } });
+      await new Promise(resolve => setTimeout(resolve, 100));
+      if (!await panel.webContents.executeJavaScript(`[...document.querySelectorAll('.message')].some(row => !row.hidden && row.textContent.includes('Streaming content arrived.'))`)) throw new Error('Streaming placeholder did not reappear');
       const codeResult = await panel.webContents.executeJavaScript(`(async () => {
         const block = document.querySelector('.code-block');
         const copy = block.querySelector('button'); copy.click();
@@ -278,6 +315,20 @@ app.whenReady().then(async () => {
       })()`);
       if (!questionResult) throw new Error('Question selection feedback failed');
       const original = panel.getBounds();
+      const assert = require('node:assert/strict');
+      const modeDisplay = screen.getDisplayMatching(original);
+      await panel.webContents.executeJavaScript(`window.hud.action('maximize')`);
+      assert.deepEqual(panel.getBounds(), modeDisplay.workArea);
+      await collapse(); assert.equal(panel.getBounds().width, compactSize.width);
+      await openPanel(); assert.deepEqual(panel.getBounds(), modeDisplay.workArea);
+      await panel.webContents.executeJavaScript(`window.hud.action('maximize')`);
+      assert.deepEqual(panel.getBounds(), original);
+      await panel.webContents.executeJavaScript(`document.dispatchEvent(new KeyboardEvent('keydown', { key: 'F11', bubbles: true }))`);
+      await new Promise(resolve => setTimeout(resolve, 100));
+      assert.deepEqual(panel.getBounds(), modeDisplay.bounds);
+      await panel.webContents.executeJavaScript(`document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))`);
+      await new Promise(resolve => setTimeout(resolve, 100));
+      assert.equal(expanded, true); assert.deepEqual(panel.getBounds(), original);
       const iconPosition = () => panel.webContents.executeJavaScript(`(() => { const r = document.querySelector('.brand-mark').getBoundingClientRect(); return {x:r.x,y:r.y}; })()`);
       const iconBefore = await iconPosition();
       const shrinking = collapse();
@@ -332,6 +383,9 @@ ipcMain.handle('action', async (event, action, value) => {
   if (action === 'open') openPanel();
   if (action === 'collapse') collapse();
   if (action === 'toggle') toggle();
+  if (action === 'maximize' && event.sender === panel?.webContents) setWindowMode(windowMode === 'normal' ? 'maximized' : 'normal');
+  if (action === 'fullscreen' && event.sender === panel?.webContents) setWindowMode(windowMode === 'fullscreen' ? 'normal' : 'fullscreen');
+  if (action === 'exit-fullscreen' && event.sender === panel?.webContents && windowMode === 'fullscreen') setWindowMode('normal');
   if (action === 'quit') app.quit();
   if (action === 'check-updates') return updates?.check();
   if (action === 'install-update') return updates?.install();

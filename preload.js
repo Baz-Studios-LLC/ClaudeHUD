@@ -1,6 +1,7 @@
 const { contextBridge, ipcRenderer } = require('electron');
 contextBridge.exposeInMainWorld('hud', {
   action: (action, value) => ipcRenderer.invoke('action', action, value),
+  onWindowMode: callback => ipcRenderer.on('window-mode', (_, value) => callback(value)),
   claude: (action, value) => ipcRenderer.invoke('claude', action, value),
   onClaude: callback => ipcRenderer.on('claude-event', (_, value) => callback(value)),
   onNotice: callback => ipcRenderer.on('notice', (_, value) => callback(value)),
