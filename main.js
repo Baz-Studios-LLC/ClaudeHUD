@@ -33,6 +33,32 @@ function saveWindow() {
 function scheduleSaveWindow() { if (transitioning) return; clearTimeout(savePositionTimer); savePositionTimer = setTimeout(saveWindow, 200); }
 let nativeDialogOpen = false;
 let contextMenuOpen = false;
+function textMenuTemplate(params, contents) {
+  const items = [];
+  if (params.isEditable) {
+    if (params.misspelledWord) {
+      for (const suggestion of params.dictionarySuggestions || []) {
+        items.push({ label: suggestion, click: () => contents.replaceMisspelling(suggestion) });
+      }
+      if (!params.dictionarySuggestions?.length) items.push({ label: 'No spelling suggestions', enabled: false });
+      items.push({ label: 'Add to dictionary', click: () => contents.session.addWordToSpellCheckerDictionary(params.misspelledWord) });
+      items.push({ type: 'separator' });
+    }
+    items.push(
+      { role: 'undo', enabled: params.editFlags.canUndo },
+      { role: 'redo', enabled: params.editFlags.canRedo },
+      { type: 'separator' },
+      { role: 'cut', enabled: params.editFlags.canCut },
+      { role: 'copy', enabled: params.editFlags.canCopy },
+      { role: 'paste', enabled: params.editFlags.canPaste },
+      { type: 'separator' },
+      { role: 'selectAll', enabled: params.editFlags.canSelectAll }
+    );
+  } else if (params.selectionText && params.editFlags.canCopy) {
+    items.push({ label: 'Copy', accelerator: 'CmdOrCtrl+C', click: () => clipboard.writeText(params.selectionText) });
+  }
+  return items;
+}
 let capturing = false;
 let expanded = true;
 let expandedSize = { width: 460, height: 740 };
@@ -181,9 +207,10 @@ app.whenReady().then(async () => {
   panel.setOpacity(saved.opacity);
   panel.setIcon(createTrayIcon());
   panel.webContents.on('context-menu', (_event, params) => {
-    if (!params.selectionText || !params.editFlags.canCopy || contextMenuOpen) return;
-    const selectedText = params.selectionText;
-    const menu = Menu.buildFromTemplate([{ label: 'Copy', accelerator: 'CmdOrCtrl+C', click: () => clipboard.writeText(selectedText) }]);
+    if (contextMenuOpen) return;
+    const template = textMenuTemplate(params, panel.webContents);
+    if (!template.length) return;
+    const menu = Menu.buildFromTemplate(template);
     contextMenuOpen = true;
     menu.popup({ window: panel, callback: () => {
       contextMenuOpen = false;
@@ -229,6 +256,15 @@ app.whenReady().then(async () => {
   }
   if (smoke) {
     try {
+      let replacement, dictionaryWord;
+      const spellingMenu = textMenuTemplate({ isEditable: true, misspelledWord: 'teh', dictionarySuggestions: ['the'], editFlags: { canCopy: false, canPaste: true } }, {
+        replaceMisspelling: word => { replacement = word; },
+        session: { addWordToSpellCheckerDictionary: word => { dictionaryWord = word; } }
+      });
+      spellingMenu.find(item => item.label === 'the').click();
+      spellingMenu.find(item => item.label === 'Add to dictionary').click();
+      if (replacement !== 'the' || dictionaryWord !== 'teh' || !spellingMenu.find(item => item.role === 'paste').enabled) throw new Error('Spelling menu failed');
+      if (textMenuTemplate({ isEditable: false, selectionText: '', editFlags: {} }, {}).length) throw new Error('Empty context menu');
       fs.mkdirSync(path.join(__dirname, 'artifacts'), { recursive: true });
       panel.webContents.send('claude-event', { type: 'snapshot', data: { project: 'C:\\Addons\\TestAddon', connection: { ready: true }, busy: false, messages: [] } });
       panel.webContents.send('claude-event', { type: 'message', data: { id: 'test-message', role: 'Claude', text: 'Connected UI test response\n```lua\n  print("Hello, Azeroth!")\n-- <script> stays literal\n```', time: Date.now() } });

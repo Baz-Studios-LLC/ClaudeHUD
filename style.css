@@ -171,11 +171,11 @@ kbd{font:inherit;color:#c4beb2}
 .queued-message p{margin:0 0 6px;white-space:pre-wrap;overflow-wrap:anywhere;max-height:70px;overflow:auto}
 .queued-actions{display:flex;gap:8px}
 .queued-message textarea{width:100%;min-height:65px;resize:vertical;background:#1e1e1c;color:#faf9f5;border:1px solid #685044;border-radius:5px;padding:8px;margin-bottom:6px}
-#chat-search{display:flex;align-items:center;gap:6px;padding:6px 15px;flex-shrink:0;border-bottom:1px solid #454039}
-#chat-search input{min-width:0;flex:1;background:#26231f;color:#faf9f5;border:1px solid #685044;border-radius:5px;padding:6px}
-#chat-search button{background:transparent;border:0;border-radius:4px;padding:4px 7px}
+#chat-search{display:flex;align-items:center;gap:4px;flex:1;min-width:0}
+#chat-search input{min-width:0;width:0;flex:1;background:#26231f;color:#faf9f5;border:1px solid #514338;border-radius:5px;padding:4px 7px;font-size:11px;height:25px}
+#chat-search button{background:transparent;border:0;border-radius:4px;padding:3px 4px;flex-shrink:0}
 #chat-search-count{font-size:10px;white-space:nowrap;color:#b0aea5}
-#chat-search-toggle{padding:0 6px;font-size:20px;line-height:22px}
+.channel .project-button{max-width:38%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex-shrink:0}
 ::highlight(search-results){background:#69512b;color:#fff}
 ::highlight(search-current){background:#d97757;color:#141413}
 .settings-open #chat-search{display:none}

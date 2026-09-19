@@ -78,7 +78,9 @@ function selectSearchMatch(step = 0, scroll = true) {
   if (searchMatches.length) searchIndex = (Math.max(0, searchIndex) + step + searchMatches.length) % searchMatches.length;
   else searchIndex = -1;
   CSS.highlights.set('search-current', new Highlight(...(searchIndex < 0 ? [] : [searchMatches[searchIndex]])));
-  $('#chat-search-count').textContent = searchMatches.length ? `${searchIndex + 1} / ${searchMatches.length}` : 'No matches';
+  const hasQuery = !!$('#chat-search-input').value;
+  $('#chat-search-count').textContent = searchMatches.length ? `${searchIndex + 1} / ${searchMatches.length}` : hasQuery ? 'No matches' : '';
+  for (const id of ['chat-search-count', 'chat-search-prev', 'chat-search-next', 'chat-search-close']) $(`#${id}`).hidden = !hasQuery;
   $('#chat-search-prev').disabled = $('#chat-search-next').disabled = !searchMatches.length;
   if (scroll && searchIndex >= 0) {
     const range = searchMatches[searchIndex], box = range.getBoundingClientRect(), viewport = $('#messages').getBoundingClientRect();
@@ -108,15 +110,14 @@ function searchConversation(scroll = true) {
   selectSearchMatch(0, scroll);
 }
 function refreshSearch() {
-  if (!$('#chat-search').hidden) { clearTimeout(searchTimer); searchTimer = setTimeout(() => searchConversation(false), 150); }
+  if ($('#chat-search-input').value) { clearTimeout(searchTimer); searchTimer = setTimeout(() => searchConversation(false), 150); }
 }
 function showChatSearch(open) {
-  $('#chat-search').hidden = !open;
+  if (!open) $('#chat-search-input').value = '';
   if (open) { showSettings(false); $('#chat-search-input').focus(); $('#chat-search-input').select(); }
   searchConversation(open);
   if (!open) $('#prompt').focus();
 }
-$('#chat-search-toggle').onclick = () => showChatSearch($('#chat-search').hidden);
 $('#chat-search-close').onclick = () => showChatSearch(false);
 $('#chat-search-input').oninput = () => { searchIndex = 0; searchConversation(); };
 $('#chat-search-input').onkeydown = event => {
@@ -126,7 +127,7 @@ $('#chat-search-prev').onclick = () => selectSearchMatch(-1);
 $('#chat-search-next').onclick = () => selectSearchMatch(1);
 document.addEventListener('keydown', event => {
   if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'f') { event.preventDefault(); showChatSearch(true); }
-  if (event.key === 'Escape' && !$('#chat-search').hidden) { event.preventDefault(); event.stopImmediatePropagation(); showChatSearch(false); }
+  if (event.key === 'Escape' && ($('#chat-search-input').value || document.activeElement === $('#chat-search-input'))) { event.preventDefault(); event.stopImmediatePropagation(); showChatSearch(false); }
 });
 let jumpFrame;
 let pendingScroll = false;
@@ -335,7 +336,6 @@ bridge.onClaude(({ type, data }) => {
     $('#conversation-title').title = data.title || 'Addon conversation';
     $('#choose-project').textContent = project ? project.split(/[\\/]/).pop() + ' ▾' : 'Choose addon folder ▾';
     $('#choose-project').title = project || 'Choose your WoW addon folder';
-    $('#connection-label').textContent = connected ? 'Connected' : 'Offline';
     $('#connection-detail').textContent = connected ? (project ? 'Working in your selected addon folder.' : 'Choose your addon folder to start a conversation.') : data.connection.detail;
     $('#connection-banner').hidden = connected && !!project;
     $('#messages').innerHTML = welcome; messageNodes.clear(); requests.clear();
