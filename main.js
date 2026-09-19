@@ -32,6 +32,7 @@ function saveWindow() {
 }
 function scheduleSaveWindow() { if (transitioning) return; clearTimeout(savePositionTimer); savePositionTimer = setTimeout(saveWindow, 200); }
 let nativeDialogOpen = false;
+let contextMenuOpen = false;
 let capturing = false;
 let expanded = true;
 let expandedSize = { width: 460, height: 740 };
@@ -128,7 +129,7 @@ function openPanel() { return setExpanded(true); }
 function collapse() { return setExpanded(false); }
 function toggle() { return setExpanded(!expanded); }
 function collapseOnBlur() {
-  if (expanded && !nativeDialogOpen && !capturing && !quitting) return collapse();
+  if (expanded && !nativeDialogOpen && !contextMenuOpen && !capturing && !quitting) return collapse();
   return Promise.resolve();
 }
 function createTrayIcon() {
@@ -181,6 +182,16 @@ app.whenReady().then(async () => {
   panel = new BrowserWindow({ ...windowOptions(size.width, size.height), minWidth: expanded ? 380 : compactSize.width, minHeight: expanded ? 520 : compactSize.height, resizable: expanded, focusable: expanded, x: bounds.x, y: bounds.y });
   panel.setOpacity(saved.opacity);
   panel.setIcon(createTrayIcon());
+  panel.webContents.on('context-menu', (_event, params) => {
+    if (!params.selectionText || !params.editFlags.canCopy || contextMenuOpen) return;
+    const selectedText = params.selectionText;
+    const menu = Menu.buildFromTemplate([{ label: 'Copy', accelerator: 'CmdOrCtrl+C', click: () => clipboard.writeText(selectedText) }]);
+    contextMenuOpen = true;
+    menu.popup({ window: panel, callback: () => {
+      contextMenuOpen = false;
+      if (!panel.isDestroyed() && expanded) panel.focus();
+    } });
+  });
   panel.on('blur', () => {
     if (!smoke) void collapseOnBlur();
   });
