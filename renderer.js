@@ -127,7 +127,7 @@ function message(item) {
   let body = messageNodes.get(item.id);
   const nearBottom = $('#messages').scrollHeight - $('#messages').scrollTop - $('#messages').clientHeight < 100;
   if (!body) {
-    const article = document.createElement('article'); article.className = 'message';
+    const article = document.createElement('article'); article.className = item.role === 'You' ? 'message message-you' : 'message';
     const avatar = document.createElement('div'); avatar.className = `avatar ${item.role === 'You' ? 'you' : 'claude'}`; avatar.textContent = item.role === 'You' ? 'Y' : '';
     body = document.createElement('div'); body.className = 'message-body';
     const meta = document.createElement('div'); meta.className = 'message-meta';

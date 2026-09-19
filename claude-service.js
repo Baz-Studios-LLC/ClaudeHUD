@@ -194,7 +194,7 @@ class ClaudeService {
         permissionMode: this.data.permissionMode || 'default',
         allowDangerouslySkipPermissions: this.data.permissionMode === 'bypassPermissions',
         settingSources: ['project'], strictMcpConfig: true, mcpServers: {},
-        tools: ['Read', 'Glob', 'Grep', 'Edit', 'Write', 'Bash', 'AskUserQuestion', 'ExitPlanMode'],
+        tools: ['Read', 'Glob', 'Grep', 'Edit', 'Write', 'Bash', 'WebFetch', 'WebSearch', 'AskUserQuestion', 'ExitPlanMode'],
         systemPrompt: { type: 'preset', preset: 'claude_code', append: 'You are working through ClaudeHUD, a compact overlay used while playing World of Warcraft. Help develop addons in the selected workspace. Keep progress updates concise. Summarize changed files and any required in-game /reload at completion.' },
         canUseTool: this.permission.bind(this),
         hooks: { PreToolUse: [{ hooks: [async input => (this.data.permissionMode || 'default') === 'default' && ['Write', 'Edit', 'Bash'].includes(input.tool_name) ? { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'ask', permissionDecisionReason: 'Confirm this action in ClaudeHUD.' } } : {}] }] },

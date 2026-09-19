@@ -39,6 +39,10 @@ button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid 
 .avatar.claude{background:#463027;color:#eab099}
 .avatar.you{background:#2c3740;color:#a4c2dc;font-size:12px;font-weight:700}
 .message-body{min-width:0;flex:1}
+.message-you{flex-direction:row-reverse;margin-left:auto;max-width:90%}
+.message-you .message-body{flex:0 1 auto;padding:8px 12px;background:#252b2e;border:1px solid #39444a;border-radius:10px}
+.message-you .message-meta{justify-content:flex-end}
+.message-you .message-images{justify-content:flex-end}
 body:not(.show-thinking) .thinking,body:not(.show-thinking) .thinking-only{display:none}
 .thinking{margin:8px 0;color:#aaa598;border-left:2px solid #685044;padding-left:10px;font-size:11px}
 .thinking summary{cursor:pointer;color:#c5ae9e;padding:4px 0}
