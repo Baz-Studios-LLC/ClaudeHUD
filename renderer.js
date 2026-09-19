@@ -54,15 +54,25 @@ let capturing = false;
 const modeDescriptions = { default: 'Ask before changes and commands', auto: 'Claude handles permission decisions', acceptEdits: 'Automatically accept file edits', plan: 'Plan before making changes', bypassPermissions: 'Allow tools without permission prompts' };
 const messageNodes = new Map(), requests = new Map();
 const welcome = $('#messages').innerHTML;
+let jumpFrame;
+let pendingScroll = false;
+function chatLayoutHidden() { return document.body.classList.contains('collapsed') || document.body.classList.contains('transitioning'); }
+function scheduleJumpButton() {
+  if (!jumpFrame) jumpFrame = requestAnimationFrame(() => { jumpFrame = null; updateJumpButton(); });
+}
 function updateJumpButton() {
+  if (chatLayoutHidden()) return;
   const messages = $('#messages');
   $('#jump-latest').hidden = messages.scrollHeight - messages.scrollTop - messages.clientHeight <= 24;
 }
-function scrollToBottom() { $('#messages').scrollTop = $('#messages').scrollHeight; updateJumpButton(); }
-$('#messages').addEventListener('scroll', updateJumpButton, { passive: true });
-$('#messages').addEventListener('load', updateJumpButton, true);
-new ResizeObserver(updateJumpButton).observe($('#messages'));
-new MutationObserver(updateJumpButton).observe($('#messages'), { childList: true, subtree: true, characterData: true });
+function scrollToBottom() {
+  if (chatLayoutHidden()) { pendingScroll = true; return; }
+  pendingScroll = false; $('#messages').scrollTop = $('#messages').scrollHeight; updateJumpButton();
+}
+$('#messages').addEventListener('scroll', scheduleJumpButton, { passive: true });
+$('#messages').addEventListener('load', scheduleJumpButton, true);
+new ResizeObserver(scheduleJumpButton).observe($('#messages'));
+new MutationObserver(scheduleJumpButton).observe($('#messages'), { childList: true, subtree: true, characterData: true });
 $('#jump-latest').onclick = () => { scrollToBottom(); $('#prompt').focus(); };
 function contextUsage(context) {
   const known = context && Number.isFinite(context.used);
@@ -123,9 +133,9 @@ function renderMessageText(container, text) {
   });
   while (container.children.length > parts.length) container.lastElementChild.remove();
 }
-function message(item) {
+function message(item, follow = true) {
   let body = messageNodes.get(item.id);
-  const nearBottom = $('#messages').scrollHeight - $('#messages').scrollTop - $('#messages').clientHeight < 100;
+  const nearBottom = follow && $('#messages').scrollHeight - $('#messages').scrollTop - $('#messages').clientHeight < 100;
   if (!body) {
     const article = document.createElement('article'); article.className = item.role === 'You' ? 'message message-you' : 'message';
     const avatar = document.createElement('div'); avatar.className = `avatar ${item.role === 'You' ? 'you' : 'claude'}`; avatar.textContent = item.role === 'You' ? 'Y' : '';
@@ -154,10 +164,29 @@ function message(item) {
     const content = document.createElement('div'); content.className = 'thinking-content';
     thinking.append(summary, content); body.insertBefore(thinking, body.querySelector('.response-text'));
   }
-  if (thinking) { thinking.hidden = !hasThinking; thinking.querySelector('.thinking-content').textContent = item.thinking || ''; }
+  if (thinking) {
+    thinking.hidden = !hasThinking;
+    const content = thinking.querySelector('.thinking-content');
+    if (content.textContent !== (item.thinking || '')) content.textContent = item.thinking || '';
+  }
   body.closest('.message').hidden = !hasText && !hasThinking && !hasImages;
   body.closest('.message').classList.toggle('thinking-only', hasThinking && !hasText && !hasImages);
-  if (nearBottom || item.role === 'You') scrollToBottom();
+  if (follow && (nearBottom || item.role === 'You')) scrollToBottom();
+}
+const pendingMessages = new Map();
+let messageFrame;
+function queueMessage(item) {
+  pendingMessages.set(item.id, item);
+  if (messageFrame) return;
+  messageFrame = requestAnimationFrame(() => {
+    messageFrame = null;
+    if (chatLayoutHidden()) return;
+    const messages = $('#messages');
+    const follow = messages.scrollHeight - messages.scrollTop - messages.clientHeight < 100 || [...pendingMessages.values()].some(item => item.role === 'You');
+    for (const item of pendingMessages.values()) message(item, false);
+    pendingMessages.clear();
+    if (follow) scrollToBottom();
+  });
 }
 function localError(text) { message({ id: crypto.randomUUID(), role: 'System', text, time: Date.now() }); scrollToBottom(); }
 async function claude(action, value) {
@@ -211,6 +240,7 @@ function permission(data) {
 }
 bridge.onClaude(({ type, data }) => {
   if (type === 'snapshot') {
+    pendingMessages.clear();
     draftEpoch++; attachments = []; renderAttachments();
     project = data.project; connected = data.connection.ready; busy = data.busy;
     renderQueue(data.queued);
@@ -225,9 +255,9 @@ bridge.onClaude(({ type, data }) => {
     $('#connection-detail').textContent = connected ? (project ? 'Working in your selected addon folder.' : 'Choose your addon folder to start a conversation.') : data.connection.detail;
     $('#connection-banner').hidden = connected && !!project;
     $('#messages').innerHTML = welcome; messageNodes.clear(); requests.clear();
-    for (const item of data.messages) message(item); scrollToBottom(); controls();
+    for (const item of data.messages) message(item, false); scrollToBottom(); controls();
   }
-  if (type === 'message') message(data);
+  if (type === 'message') queueMessage(data);
   if (type === 'queue') renderQueue(data);
   if (type === 'model') modelState(data);
   if (type === 'context') contextUsage(data);
@@ -255,6 +285,11 @@ function showSettings(open, persist = true) {
 bridge.onFocus(() => ($('#settings').hidden ? $('#prompt') : $('#settings-close')).focus());
 bridge.onExpansion(({ expanded, transitioning }) => {
   document.body.classList.toggle('collapsed', !expanded); document.body.classList.toggle('transitioning', transitioning);
+  if (expanded && !transitioning) {
+    if (pendingMessages.size) queueMessage(pendingMessages.values().next().value);
+    if (pendingScroll) scrollToBottom();
+    scheduleJumpButton();
+  }
   $('#overlay-toggle').setAttribute('aria-expanded', String(expanded));
   $('#overlay-toggle').setAttribute('aria-label', expanded ? 'Collapse chat' : 'Open chat'); $('#overlay-toggle').title = expanded ? 'Collapse chat' : 'Open chat';
   for (const child of $('#panel').children) if (child.tagName !== 'HEADER') child.inert = !expanded;

@@ -93,15 +93,13 @@ function setExpanded(next) {
   panel.setFocusable(next);
   panel.webContents.send('expansion', { expanded: next, transitioning: true });
   const target = next ? expandedSize : compactSize;
-  let lastFrame = performance.now(), elapsed = 0;
+  const animationStart = performance.now();
   if (smoke) animationFrames = [];
   // Animate the same native window. Its top-left corner and header icon never move.
   return new Promise(resolve => {
     finishTransition = resolve;
     transitionTimer = setInterval(() => {
-      const now = performance.now();
-      elapsed += Math.min(48, now - lastFrame); lastFrame = now;
-      const t = Math.min(1, elapsed / 240);
+      const t = Math.min(1, (performance.now() - animationStart) / 240);
       const eased = 1 - Math.pow(1 - t, 3);
       panel.setBounds({ x: start.x, y: start.y,
         width: Math.round(start.width + (target.width - start.width) * eased),
@@ -325,6 +323,17 @@ app.whenReady().then(async () => {
         return toggled && gap === '8px' && choices[1].getAttribute('aria-pressed') === 'false';
       })()`);
       if (!questionResult) throw new Error('Question selection feedback failed');
+      const historyPerformance = await panel.webContents.executeJavaScript(`(async () => {
+        const start = performance.now();
+        for (let i = 0; i < 500; i++) message({ id: 'history-' + i, role: i % 2 ? 'You' : 'Claude', text: 'Long conversation layout test. '.repeat(20) }, false);
+        scrollToBottom();
+        const loadMs = performance.now() - start;
+        for (let i = 0; i < 100; i++) queueMessage({ id: 'stream-performance', role: 'Claude', text: 'Stream update ' + i });
+        await new Promise(resolve => requestAnimationFrame(resolve));
+        const body = messageNodes.get('stream-performance');
+        if (!body || !body.textContent.includes('Stream update 99')) throw new Error('Batched stream lost final text');
+        return { loadMs, historyMessages: 500 };
+      })()`);
       const original = panel.getBounds();
       const assert = require('node:assert/strict');
       const modeDisplay = screen.getDisplayMatching(original);
@@ -365,7 +374,7 @@ app.whenReady().then(async () => {
       nativeDialogOpen = false; await collapseOnBlur();
       if (expanded || panel.getBounds().height !== compactSize.height) throw new Error('Blur did not collapse panel');
       await openPanel();
-      fs.writeFileSync(path.join(__dirname, 'artifacts', 'smoke.json'), JSON.stringify({ passed: true, ...result }, null, 2));
+      fs.writeFileSync(path.join(__dirname, 'artifacts', 'smoke.json'), JSON.stringify({ passed: true, ...result, historyPerformance }, null, 2));
       app.exit(0);
     } catch (error) { console.error(error); app.exit(1); }
   }

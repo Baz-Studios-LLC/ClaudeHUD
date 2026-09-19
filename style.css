@@ -126,6 +126,7 @@ kbd{font:inherit;color:#c4beb2}
 .collapsed .panel> :not(.titlebar){visibility:hidden;pointer-events:none}
 .transitioning .titlebar{-webkit-app-region:no-drag}
 .transitioning .panel> :not(.titlebar){opacity:0;pointer-events:none}
+.transitioning .conversation-view,.collapsed .conversation-view{content-visibility:hidden}
 .panel> :not(.titlebar){transition:opacity 100ms ease}
 
 /* Use the supplied white artwork as a mask, keeping the source PNG unchanged. */
