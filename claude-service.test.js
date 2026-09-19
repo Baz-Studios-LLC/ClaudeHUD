@@ -54,6 +54,29 @@ async function waitFor(predicate) {
   for (let i = 0; i < 100 && !predicate(); i++) await new Promise(resolve => setTimeout(resolve, 5));
   assert.ok(predicate());
 }
+test('editing holds queued messages, preserves order, and persists saved text', async () => {
+  const { service, calls, releases, root } = queuedFixture();
+  try {
+    await service.send('First'); await waitFor(() => releases.length === 1);
+    await service.send('Original'); await service.send('Third');
+    const id = service.queue()[0].id;
+    service.beginQueuedEdit(id);
+    releases[0](); await idle(service);
+    assert.equal(calls.length, 1);
+    await assert.rejects(service.finishQueuedEdit({ id, text: '' }), /Enter a message/);
+    assert.equal(service.queue()[0].text, 'Original');
+    await service.finishQueuedEdit({ id, text: 'Edited' }); await waitFor(() => releases.length === 2);
+    assert.equal(calls[1].prompt, 'Edited');
+    const restored = new ClaudeService({ storage: service.storage, emit() {} });
+    assert.ok(restored.session().messages.some(item => item.text === 'Edited'));
+    assert.equal(service.queue()[0].text, 'Third');
+    service.beginQueuedEdit(service.queue()[0].id);
+    await service.finishQueuedEdit({ id: service.queue()[0].id, cancel: true });
+    assert.equal(service.queue()[0].text, 'Third');
+    await assert.rejects(service.finishQueuedEdit({ id, text: 'Stale' }), /no longer/);
+    service.stop(); await idle(service);
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
 test('queued messages preserve order, persist, and do not interrupt active work', async () => {
   const { service, calls, releases, root } = queuedFixture();
   await service.send('First'); await waitFor(() => releases.length === 1);

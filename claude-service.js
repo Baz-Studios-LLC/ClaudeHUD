@@ -18,6 +18,22 @@ class ClaudeService {
   modelState() { return { model: this.data.model || 'default', activeModel: this.session()?.activeModel || null }; }
   queue() { return this.session()?.queued || []; }
   queueChanged() { this.emit('queue', this.queue()); }
+  beginQueuedEdit(id) {
+    if (this.editingQueued && this.editingQueued !== id) throw new Error('Save or cancel your current edit first.');
+    if (this.promoting || !this.queue().some(item => item.id === id)) throw new Error('That message is no longer available to edit.');
+    this.editingQueued = id;
+  }
+  async finishQueuedEdit({ id, text, cancel = false }) {
+    const item = this.queue().find(item => item.id === id);
+    if (!item || this.editingQueued !== id) throw new Error('That message is no longer being edited.');
+    if (!cancel) {
+      if (typeof text !== 'string' || text.length > 12000 || (!text.trim() && !item.images?.length)) throw new Error('Enter a message (up to 12,000 characters).');
+      const previous = item.text; item.text = text.trim();
+      try { this.save(); } catch (error) { item.text = previous; throw error; }
+    }
+    this.editingQueued = null; this.queueChanged();
+    await this.drainQueue();
+  }
   removeQueued(id) {
     if (this.promoting) throw new Error('Wait for the message to start.');
     const queue = this.queue(), index = queue.findIndex(item => item.id === id);
@@ -41,7 +57,7 @@ class ClaudeService {
     } finally { this.promoting = false; }
   }
   async drainQueue() {
-    if (this.busy || this.promoting || !this.queue().length) return;
+    if (this.busy || this.promoting || !this.queue().length || this.queue()[0].id === this.editingQueued) return;
     const item = this.queue().shift();
     try { await this.send(item, true); }
     catch (error) { this.queue().unshift(item); this.save(); this.emit('failure', { text: error.message }); }
@@ -89,6 +105,7 @@ class ClaudeService {
     });
     if (this.busy || this.promoting) throw new Error('Stop the current task before loading a conversation.');
     const project = fs.realpathSync(info.cwd);
+    this.editingQueued = null;
     this.data.project = project;
     let context = this.data.sessions[project]?.sessionId === id ? this.data.sessions[project].context : null;
     for (const item of history) if (item.type === 'assistant' && !item.parent_tool_use_id) context = latestContext(item.message, context);
@@ -114,6 +131,7 @@ class ClaudeService {
   selectProject(project) {
     if (this.busy || this.promoting) throw new Error('Stop the current task before switching addons.');
     if (!fs.statSync(project).isDirectory()) throw new Error('Select an addon folder.');
+    this.editingQueued = null;
     this.data.project = fs.realpathSync(project);
     this.data.sessions[this.data.project] ||= { messages: [], sessionId: null };
     this.save(); this.emit('snapshot', this.snapshot());
@@ -121,6 +139,7 @@ class ClaudeService {
   newChat() {
     if (this.busy || this.promoting) throw new Error('Stop the current task before starting a new chat.');
     if (!this.session()) return;
+    this.editingQueued = null;
     this.data.sessions[this.data.project] = { messages: [], sessionId: null };
     this.save(); this.emit('snapshot', this.snapshot());
   }

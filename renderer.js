@@ -14,22 +14,41 @@ bridge.onWindowMode(mode => {
   $('#fullscreen-toggle').textContent = mode === 'fullscreen' ? 'Exit full screen (F11)' : 'Full screen (F11)';
 });
 let submitting = false;
+let queuedItems = [], queueEditor = null;
 function renderQueue(items = []) {
+  queuedItems = items;
   $('#message-queue').hidden = !items.length;
   $('#queue-items').replaceChildren();
   for (const item of items) {
     const row = document.createElement('div'); row.className = 'queued-message';
-    const text = document.createElement('p'); text.textContent = item.text || 'Screenshot'; row.append(text);
+    const editing = queueEditor?.id === item.id;
+    const text = document.createElement(editing ? 'textarea' : 'p');
+    if (editing) {
+      text.value = queueEditor.text; text.maxLength = 12000; text.setAttribute('aria-label', 'Edit queued message');
+      text.oninput = () => { queueEditor.text = text.value; };
+    } else text.textContent = item.text || 'Screenshot';
+    row.append(text);
     if (item.images?.length) {
       const images = document.createElement('div'); images.className = 'queued-images';
       for (const attachment of item.images) { const image = document.createElement('img'); image.src = `data:${attachment.type};base64,${attachment.data}`; image.alt = 'Queued screenshot'; images.append(image); }
       row.append(images);
     }
     const buttons = document.createElement('div'); buttons.className = 'queued-actions';
-    for (const [label, name] of [['Send now', 'send-queued-now'], ['Remove', 'remove-queued']]) {
+    for (const [label, name] of (editing ? [['Save', 'save'], ['Cancel', 'cancel']] : [['Edit', 'edit'], ['Send now', 'send-queued-now'], ['Remove', 'remove-queued']])) {
       const button = document.createElement('button'); button.type = 'button'; button.className = 'quiet'; button.textContent = label;
       button.title = name === 'send-queued-now' ? 'Interrupt the current task and send this message' : 'Remove this queued message';
-      button.onclick = async () => { for (const control of $('#queue-items').querySelectorAll('button')) control.disabled = true; await claude(name, item.id); for (const control of $('#queue-items').querySelectorAll('button')) control.disabled = false; };
+      button.disabled = !!queueEditor && !editing;
+      button.title = editing ? `${label} changes` : name === 'edit' ? 'Edit this message before it sends' : button.title;
+      button.onclick = async () => {
+        for (const control of $('#queue-items').querySelectorAll('button')) control.disabled = true;
+        if (name === 'edit') {
+          if (await claude('edit-queued', item.id)) queueEditor = { id: item.id, text: item.text };
+        } else if (editing) {
+          if (await claude('save-queued', { id: item.id, text: queueEditor.text, cancel: name === 'cancel' })) queueEditor = null;
+        } else await claude(name, item.id);
+        renderQueue(queuedItems);
+        if (queueEditor) $('#queue-items textarea')?.focus();
+      };
       buttons.append(button);
     }
     row.append(buttons); $('#queue-items').append(row);
@@ -54,6 +73,61 @@ let capturing = false;
 const modeDescriptions = { default: 'Ask before changes and commands', auto: 'Claude handles permission decisions', acceptEdits: 'Automatically accept file edits', plan: 'Plan before making changes', bypassPermissions: 'Allow tools without permission prompts' };
 const messageNodes = new Map(), requests = new Map();
 const welcome = $('#messages').innerHTML;
+let searchMatches = [], searchIndex = -1, searchTimer;
+function selectSearchMatch(step = 0, scroll = true) {
+  if (searchMatches.length) searchIndex = (Math.max(0, searchIndex) + step + searchMatches.length) % searchMatches.length;
+  else searchIndex = -1;
+  CSS.highlights.set('search-current', new Highlight(...(searchIndex < 0 ? [] : [searchMatches[searchIndex]])));
+  $('#chat-search-count').textContent = searchMatches.length ? `${searchIndex + 1} / ${searchMatches.length}` : 'No matches';
+  $('#chat-search-prev').disabled = $('#chat-search-next').disabled = !searchMatches.length;
+  if (scroll && searchIndex >= 0) {
+    const range = searchMatches[searchIndex], box = range.getBoundingClientRect(), viewport = $('#messages').getBoundingClientRect();
+    $('#messages').scrollTop += box.top - viewport.top - viewport.height / 2;
+  }
+}
+function searchConversation(scroll = true) {
+  clearTimeout(searchTimer);
+  searchMatches = [];
+  const query = $('#chat-search-input').value.toLowerCase();
+  if (!$('#chat-search').hidden && query) {
+    for (const body of messageNodes.values()) {
+      const nodes = [], walker = document.createTreeWalker(body.querySelector('.response-text'), NodeFilter.SHOW_TEXT, { acceptNode: node => node.parentElement.closest('.code-toolbar') ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT });
+      let node, text = '';
+      while ((node = walker.nextNode())) { nodes.push({ node, start: text.length }); text += node.textContent; }
+      const lower = text.toLowerCase();
+      for (let at = lower.indexOf(query); at >= 0; at = lower.indexOf(query, at + query.length)) {
+        const first = nodes.find(item => item.start + item.node.length > at);
+        const last = nodes.find(item => item.start + item.node.length >= at + query.length);
+        if (!first || !last) continue;
+        const range = document.createRange(); range.setStart(first.node, at - first.start); range.setEnd(last.node, at + query.length - last.start); searchMatches.push(range);
+      }
+    }
+  }
+  CSS.highlights.set('search-results', new Highlight(...searchMatches));
+  searchIndex = Math.min(Math.max(searchIndex, 0), searchMatches.length - 1);
+  selectSearchMatch(0, scroll);
+}
+function refreshSearch() {
+  if (!$('#chat-search').hidden) { clearTimeout(searchTimer); searchTimer = setTimeout(() => searchConversation(false), 150); }
+}
+function showChatSearch(open) {
+  $('#chat-search').hidden = !open;
+  if (open) { showSettings(false); $('#chat-search-input').focus(); $('#chat-search-input').select(); }
+  searchConversation(open);
+  if (!open) $('#prompt').focus();
+}
+$('#chat-search-toggle').onclick = () => showChatSearch($('#chat-search').hidden);
+$('#chat-search-close').onclick = () => showChatSearch(false);
+$('#chat-search-input').oninput = () => { searchIndex = 0; searchConversation(); };
+$('#chat-search-input').onkeydown = event => {
+  if (event.key === 'Enter') { event.preventDefault(); selectSearchMatch(event.shiftKey ? -1 : 1); }
+};
+$('#chat-search-prev').onclick = () => selectSearchMatch(-1);
+$('#chat-search-next').onclick = () => selectSearchMatch(1);
+document.addEventListener('keydown', event => {
+  if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'f') { event.preventDefault(); showChatSearch(true); }
+  if (event.key === 'Escape' && !$('#chat-search').hidden) { event.preventDefault(); event.stopImmediatePropagation(); showChatSearch(false); }
+});
 let jumpFrame;
 let pendingScroll = false;
 function chatLayoutHidden() { return document.body.classList.contains('collapsed') || document.body.classList.contains('transitioning'); }
@@ -90,7 +164,7 @@ function controls() {
   const queueing = busy || !$('#message-queue').hidden;
   $('#send').title = queueing ? 'Queue message' : 'Send message';
   $('#send').setAttribute('aria-label', queueing ? 'Queue message' : 'Send message');
-  $('#queue-label').textContent = busy ? 'Queued · sends when Claude finishes' : 'Queue paused · choose Send now to continue';
+  $('#queue-label').textContent = queueEditor ? 'Editing · this message waits until you save or cancel' : busy ? 'Queued · sends when Claude finishes' : 'Queue paused · choose Send now to continue';
   $('#capture-game').disabled = capturing || pasting > 0 || attachments.length >= 4;
   $('#stop').hidden = !busy; $('#choose-project').disabled = busy; $('#new-chat').disabled = busy; $('#conversations-open').disabled = busy;
   $('#permission-mode').disabled = busy;
@@ -176,6 +250,7 @@ function message(item, follow = true) {
   body.closest('.message').hidden = !hasText && !hasThinking && !hasImages;
   body.closest('.message').classList.toggle('thinking-only', hasThinking && !hasText && !hasImages);
   if (follow && (nearBottom || item.role === 'You')) scrollToBottom();
+  refreshSearch();
 }
 const pendingMessages = new Map();
 let messageFrame;
@@ -248,6 +323,7 @@ function permission(data) {
 }
 bridge.onClaude(({ type, data }) => {
   if (type === 'snapshot') {
+    if (!data.queued?.some(item => item.id === queueEditor?.id)) queueEditor = null;
     pendingMessages.clear();
     draftEpoch++; attachments = []; renderAttachments();
     project = data.project; connected = data.connection.ready; busy = data.busy;
@@ -263,7 +339,7 @@ bridge.onClaude(({ type, data }) => {
     $('#connection-detail').textContent = connected ? (project ? 'Working in your selected addon folder.' : 'Choose your addon folder to start a conversation.') : data.connection.detail;
     $('#connection-banner').hidden = connected && !!project;
     $('#messages').innerHTML = welcome; messageNodes.clear(); requests.clear();
-    for (const item of data.messages) message(item, false); scrollToBottom(); controls();
+    for (const item of data.messages) message(item, false); scrollToBottom(); controls(); refreshSearch();
   }
   if (type === 'message') queueMessage(data);
   if (type === 'queue') renderQueue(data);

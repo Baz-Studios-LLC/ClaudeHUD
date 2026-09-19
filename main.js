@@ -276,7 +276,21 @@ app.whenReady().then(async () => {
       panel.webContents.send('claude-event', { type: 'queue', data: [{ id: 'queue-test', text: 'Also check the minimap button spacing.', images: [] }] });
       await new Promise(resolve => setTimeout(resolve, 100));
       const queueResult = await panel.webContents.executeJavaScript(`({ visible: !document.querySelector('#message-queue').hidden, enabled: !document.querySelector('#send').disabled, label: document.querySelector('#send').getAttribute('aria-label'), actions: [...document.querySelectorAll('.queued-actions button')].map(button => button.textContent) })`);
-      if (!queueResult.visible || !queueResult.enabled || queueResult.label !== 'Queue message' || queueResult.actions.join(',') !== 'Send now,Remove') throw new Error('Queue controls failed');
+      if (!queueResult.visible || !queueResult.enabled || queueResult.label !== 'Queue message' || queueResult.actions.join(',') !== 'Edit,Send now,Remove') throw new Error('Queue controls failed');
+      await panel.webContents.executeJavaScript(`(async () => {
+        const originalClaude = claude, calls = [];
+        try {
+          claude = async (name, value) => { calls.push({ name, value }); return { ok: true }; };
+          await document.querySelector('.queued-actions button').onclick();
+          const editor = document.querySelector('#queue-items textarea');
+          if (!editor) throw new Error('Queue editor missing');
+          editor.value = 'Updated queued message'; editor.dispatchEvent(new Event('input'));
+          renderQueue(queuedItems);
+          if (document.querySelector('#queue-items textarea').value !== 'Updated queued message') throw new Error('Queue redraw lost edit');
+          await document.querySelector('.queued-actions button').onclick();
+          if (calls[0].name !== 'edit-queued' || calls[1].value.text !== 'Updated queued message' || queueEditor) throw new Error('Queue edit save failed');
+        } finally { claude = originalClaude; }
+      })()`);
       if (!await panel.webContents.executeJavaScript(`!document.querySelector('#update-ready').hidden && document.querySelector('#update-ready').disabled`)) throw new Error('Update chip must wait while Claude works');
       fs.writeFileSync(path.join(__dirname, 'artifacts', 'queue.png'), (await panel.webContents.capturePage()).toPNG());
       panel.webContents.send('claude-event', { type: 'queue', data: [] });
@@ -329,6 +343,19 @@ app.whenReady().then(async () => {
         return body.querySelector('strong') && body.querySelector('.markdown strong').textContent === 'Two' && body.querySelectorAll('ol li').length === 2 && body.querySelector('code').textContent === 'self.text';
       })()`);
       if (!markdownResult) throw new Error('Markdown rendering failed');
+      await panel.webContents.executeJavaScript(`(() => {
+        showChatSearch(true);
+        const input = document.querySelector('#chat-search-input');
+        input.value = 'self.text'; input.dispatchEvent(new Event('input'));
+        if (searchMatches.length !== 1 || searchMatches[0].toString() !== 'self.text') throw new Error('Code search failed');
+        input.value = 'First'; input.dispatchEvent(new Event('input'));
+        if (!searchMatches.length) throw new Error('Message search failed');
+        selectSearchMatch(1);
+        input.value = 'no-match-unique'; input.dispatchEvent(new Event('input'));
+        if (searchMatches.length || !document.querySelector('#chat-search-next').disabled) throw new Error('Empty search failed');
+        showChatSearch(false);
+        if (CSS.highlights.get('search-results').size) throw new Error('Search highlights not cleared');
+      })()`);
       await panel.webContents.executeJavaScript(`(async () => {
         const originalClaude = claude;
         let complete;
@@ -469,6 +496,8 @@ ipcMain.handle('claude', async (event, action, value) => {
     }
     if (action === 'send') await claude.send(value);
     if (action === 'remove-queued') claude.removeQueued(value);
+    if (action === 'edit-queued') claude.beginQueuedEdit(value);
+    if (action === 'save-queued') await claude.finishQueuedEdit(value);
     if (action === 'send-queued-now') await claude.sendQueuedNow(value);
     if (action === 'stop') claude.stop();
     if (action === 'respond') claude.respond(value);

@@ -170,6 +170,15 @@ kbd{font:inherit;color:#c4beb2}
 .queued-message+.queued-message{border-top:1px solid #514338;margin-top:8px;padding-top:8px}
 .queued-message p{margin:0 0 6px;white-space:pre-wrap;overflow-wrap:anywhere;max-height:70px;overflow:auto}
 .queued-actions{display:flex;gap:8px}
+.queued-message textarea{width:100%;min-height:65px;resize:vertical;background:#1e1e1c;color:#faf9f5;border:1px solid #685044;border-radius:5px;padding:8px;margin-bottom:6px}
+#chat-search{display:flex;align-items:center;gap:6px;padding:6px 15px;flex-shrink:0;border-bottom:1px solid #454039}
+#chat-search input{min-width:0;flex:1;background:#26231f;color:#faf9f5;border:1px solid #685044;border-radius:5px;padding:6px}
+#chat-search button{background:transparent;border:0;border-radius:4px;padding:4px 7px}
+#chat-search-count{font-size:10px;white-space:nowrap;color:#b0aea5}
+#chat-search-toggle{padding:0 6px;font-size:20px;line-height:22px}
+::highlight(search-results){background:#69512b;color:#fff}
+::highlight(search-current){background:#d97757;color:#141413}
+.settings-open #chat-search{display:none}
 .queued-images{display:flex;gap:5px;margin-bottom:6px}
 .queued-images img{width:48px;height:36px;object-fit:contain;border-radius:4px}
 .approve{background:#d97757;color:#141413;border:0;border-radius:5px;padding:7px 12px;font-weight:600}
