@@ -22,4 +22,9 @@ function splitMessage(text) {
   if (plain) parts.push({ type: 'text', text: plain });
   return parts;
 }
-if (typeof module !== 'undefined') module.exports = { splitMessage };
+const markdownParser = (typeof module !== 'undefined' ? require('markdown-it') : window.markdownit)({ html: false, breaks: true });
+markdownParser.validateLink = url => /^https?:\/\//i.test(url);
+// Do not load remote images from model output; screenshots use our attachment UI.
+markdownParser.disable('image');
+function renderMarkdown(text) { return markdownParser.render(String(text || '')); }
+if (typeof module !== 'undefined') module.exports = { splitMessage, renderMarkdown };

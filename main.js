@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, globalShortcut, screen, Tray, Menu, nativeImage, dialog, desktopCapturer, clipboard } = require('electron');
+const { app, BrowserWindow, ipcMain, globalShortcut, screen, Tray, Menu, nativeImage, dialog, desktopCapturer, clipboard, shell } = require('electron');
 const { captureGame } = require('./game-capture');
 const { ClaudeService } = require('./claude-service');
 const { createUpdater } = require('./updater');
@@ -323,6 +323,28 @@ app.whenReady().then(async () => {
         return toggled && gap === '8px' && choices[1].getAttribute('aria-pressed') === 'false';
       })()`);
       if (!questionResult) throw new Error('Question selection feedback failed');
+      const markdownResult = await panel.webContents.executeJavaScript(`(() => {
+        message({ id: 'markdown-test', role: 'Claude', text: '**Two** bugs.\\n\\n1. First\\n2. Second\\n\\nInline '+String.fromCharCode(96)+'self.text'+String.fromCharCode(96) }, false);
+        const body = messageNodes.get('markdown-test');
+        return body.querySelector('strong') && body.querySelector('.markdown strong').textContent === 'Two' && body.querySelectorAll('ol li').length === 2 && body.querySelector('code').textContent === 'self.text';
+      })()`);
+      if (!markdownResult) throw new Error('Markdown rendering failed');
+      await panel.webContents.executeJavaScript(`(async () => {
+        const originalClaude = claude;
+        let complete;
+        try {
+          claude = () => new Promise(resolve => { complete = resolve; });
+          const prompt = document.querySelector('#prompt');
+          prompt.value = 'First message';
+          let sending = submit();
+          if (prompt.value !== '') throw new Error('Composer did not clear immediately');
+          prompt.value = 'Next draft'; complete({ ok: true }); await sending;
+          if (prompt.value !== 'Next draft') throw new Error('Send cleared newer draft');
+          sending = submit(); prompt.value = 'More typing'; complete(null); await sending;
+          if (prompt.value !== 'Next draft\\n\\nMore typing') throw new Error('Failed send lost draft text');
+          prompt.value = ''; resizePrompt();
+        } finally { claude = originalClaude; }
+      })()`);
       const historyPerformance = await panel.webContents.executeJavaScript(`(async () => {
         const start = performance.now();
         for (let i = 0; i < 500; i++) message({ id: 'history-' + i, role: i % 2 ? 'You' : 'Claude', text: 'Long conversation layout test. '.repeat(20) }, false);
@@ -381,6 +403,13 @@ app.whenReady().then(async () => {
 });
 ipcMain.handle('action', async (event, action, value) => {
   if (![panel, toast].some(w => w && w.webContents === event.sender)) return;
+  if (action === 'open-link' && event.sender === panel?.webContents) {
+    try {
+      const url = new URL(value);
+      if (!['https:', 'http:'].includes(url.protocol)) return { error: 'Unsupported link' };
+      await shell.openExternal(url.href); return { ok: true };
+    } catch { return { error: 'Could not open link' }; }
+  }
   if (action === 'copy-code' && event.sender === panel?.webContents) {
     if (typeof value !== 'string' || value.length > 2 * 1024 * 1024) return { error: 'Code is too large to copy.' };
     if (smoke) smokeCopiedCode = value;

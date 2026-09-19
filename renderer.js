@@ -105,7 +105,8 @@ function renderMessageText(container, text) {
   parts.forEach((part, index) => {
     let node = container.children[index];
     if (!node || node.dataset.kind !== part.type) {
-      const replacement = document.createElement(part.type === 'code' ? 'section' : 'p');
+      const replacement = document.createElement(part.type === 'code' ? 'section' : 'div');
+      if (part.type === 'text') replacement.className = 'markdown';
       replacement.dataset.kind = part.type;
       if (node) node.replaceWith(replacement); else container.append(replacement);
       node = replacement;
@@ -129,7 +130,10 @@ function renderMessageText(container, text) {
     if (part.type === 'code') {
       node.querySelector('.code-language').textContent = part.language || 'Code';
       const code = node.querySelector('code'); if (code.textContent !== part.text) code.textContent = part.text;
-    } else if (node.textContent !== part.text) node.textContent = part.text;
+    } else if (node.markdownSource !== part.text) {
+      node.innerHTML = renderMarkdown(part.text);
+      node.markdownSource = part.text;
+    }
   });
   while (container.children.length > parts.length) container.lastElementChild.remove();
 }
@@ -189,6 +193,10 @@ function queueMessage(item) {
   });
 }
 function localError(text) { message({ id: crypto.randomUUID(), role: 'System', text, time: Date.now() }); scrollToBottom(); }
+$('#messages').addEventListener('click', event => {
+  const link = event.target.closest('.markdown a');
+  if (link) { event.preventDefault(); action('open-link', link.getAttribute('href')); }
+});
 async function claude(action, value) {
   try { const result = await bridge.claude(action, value); if (result?.error) { localError(result.error); return null; } return result; }
   catch (error) { localError(error.message); return null; }
@@ -296,7 +304,7 @@ bridge.onExpansion(({ expanded, transitioning }) => {
 });
 bridge.onSettings(() => showSettings(true));
 bridge.onPreferences(value => {
-  $('#show-thinking').checked = !!value.showThinking; document.body.classList.toggle('show-thinking', !!value.showThinking);
+  setThinkingVisible(!!value.showThinking);
   $('#opacity').value = Math.round(value.opacity * 100); $('#sound').checked = value.sound;
   $('#shortcut').value = value.shortcut;
   showSettings(value.settingsOpen, false);
@@ -313,10 +321,18 @@ $('#new-chat').onclick = () => claude('new-chat');
 $('#stop').onclick = () => claude('stop');
 $('#opacity').oninput = event => action('opacity', Number(event.target.value) / 100);
 $('#sound').onchange = () => { action('sound', $('#sound').checked); if ($('#sound').checked) { audio ||= new AudioContext(); audio.resume(); } };
-$('#show-thinking').onchange = () => {
-  const enabled = $('#show-thinking').checked;
-  document.body.classList.toggle('show-thinking', enabled); action('show-thinking', enabled);
-};
+function setThinkingVisible(enabled, persist = false) {
+  $('#show-thinking').checked = enabled;
+  document.body.classList.toggle('show-thinking', enabled);
+  const button = $('#thinking-toggle');
+  button.setAttribute('aria-pressed', String(enabled));
+  button.setAttribute('aria-label', enabled ? 'Hide thinking' : 'Show thinking');
+  button.title = enabled ? 'Hide thinking summaries' : 'Show thinking summaries (new summaries start with your next message)';
+  scheduleJumpButton();
+  if (persist) action('show-thinking', enabled);
+}
+$('#show-thinking').onchange = () => setThinkingVisible($('#show-thinking').checked, true);
+$('#thinking-toggle').onclick = () => setThinkingVisible(!$('#show-thinking').checked, true);
 document.addEventListener('pointerdown', () => { if ($('#sound').checked) { audio ||= new AudioContext(); audio.resume(); } });
 $('#shortcut').onchange = async event => {
   const ok = await action('shortcut', event.target.value); $('#settings-note').textContent = ok ? 'Shortcut updated.' : 'That shortcut is unavailable. Try another.';
@@ -334,10 +350,15 @@ async function submit() {
   const sent = [...attachments];
   const originalText = $('#prompt').value, epoch = draftEpoch;
   submitting = true; controls();
+  // Clear before waiting for IPC and conversation storage, so typing can continue immediately.
+  $('#prompt').value = ''; resizePrompt();
   const result = await claude('send', { text, images: sent.map(({ type, data }) => ({ type, data })) });
   if (result && epoch === draftEpoch) {
-    if ($('#prompt').value === originalText) $('#prompt').value = '';
     resizePrompt(); attachments = attachments.filter(item => !sent.includes(item)); renderAttachments();
+  } else if (!result && epoch === draftEpoch) {
+    const nextDraft = $('#prompt').value;
+    $('#prompt').value = originalText + (originalText && nextDraft ? '\n\n' : '') + nextDraft;
+    resizePrompt();
   }
   submitting = false; controls();
 }
