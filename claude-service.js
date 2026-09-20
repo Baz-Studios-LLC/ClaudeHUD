@@ -5,15 +5,21 @@ const { randomUUID } = require('node:crypto');
 const { spawn, execFile } = require('node:child_process');
 const { promisify } = require('node:util');
 const { latestContext, withContextLimit } = require('./context-usage');
+const { AttachmentStore } = require('./attachment-store');
 
 class ClaudeService {
   constructor({ storage, emit, queryFactory, showThinking = () => false }) {
     this.showThinking = showThinking;
     this.storage = storage; this.emit = emit; this.queryFactory = queryFactory;
+    this.attachments = new AttachmentStore(storage);
     this.data = { project: null, sessions: {} }; this.pending = new Map(); this.busy = false;
     this.connection = { ready: false, detail: 'Checking Claude Code…' };
-    try { if (fs.existsSync(storage)) this.data = JSON.parse(fs.readFileSync(storage, 'utf8')); } catch { this.connection.detail = 'Saved conversation could not be loaded.'; }
+    try { if (fs.existsSync(storage)) this.data = JSON.parse(fs.readFileSync(storage, 'utf8')); } catch { this.storageError = 'Saved conversation could not be loaded. Existing history has been left untouched.'; this.connection.detail = this.storageError; }
     if (!this.data.sessions || typeof this.data.sessions !== 'object') this.data = { project: null, sessions: {} };
+    if (!this.storageError) {
+      try { if (this.externalizeImages()) this.save(); }
+      catch (error) { this.storageError = `Could not migrate saved screenshots: ${error.message}`; this.connection.detail = this.storageError; }
+    }
   }
   modelState() { return { model: this.data.model || 'default', activeModel: this.session()?.activeModel || null }; }
   async usage() {
@@ -163,12 +169,27 @@ class ClaudeService {
     this.save(); this.emit('snapshot', this.snapshot());
   }
   session() { return this.data.sessions[this.data.project]; }
+  externalizeImages() {
+    let changed = false;
+    for (const session of Object.values(this.data.sessions)) {
+      for (const item of [...(session.messages || []), ...(session.queued || [])]) {
+        if (item.images?.some(image => image.data)) {
+          item.images = item.images.map(image => this.attachments.store(image)); changed = true;
+        }
+      }
+    }
+    if (changed && fs.existsSync(this.storage) && !fs.existsSync(this.storage + '.legacy-backup')) fs.copyFileSync(this.storage, this.storage + '.legacy-backup');
+    return changed;
+  }
   save() {
+    if (this.storageError) throw new Error(this.storageError);
     fs.mkdirSync(path.dirname(this.storage), { recursive: true });
+    this.externalizeImages();
     fs.writeFileSync(this.storage + '.tmp', JSON.stringify(this.data));
     fs.renameSync(this.storage + '.tmp', this.storage);
   }
   async connect() {
+    if (this.storageError) { this.connection = { ready: false, detail: this.storageError }; this.emit('snapshot', this.snapshot()); return this.connection; }
     this.executable = path.join(os.homedir(), '.local', 'bin', 'claude.exe');
     try {
       if (!fs.existsSync(this.executable)) this.executable = 'claude';
@@ -223,7 +244,8 @@ class ClaudeService {
   }
   async send(payload, fromQueue = false) {
     const text = typeof payload === 'string' ? payload : payload?.text;
-    const images = typeof payload === 'string' ? [] : payload?.images || [];
+    let images = typeof payload === 'string' ? [] : payload?.images || [];
+    if (fromQueue && Array.isArray(images)) images = images.map(image => this.attachments.hydrate(image));
     if (!this.connection.ready) throw new Error(this.connection.detail);
     if (!this.session()) throw new Error('Choose your addon folder first.');
     if (typeof text !== 'string' || text.length > 12000 || !Array.isArray(images) || images.length > 4 || (!text.trim() && !images.length)) throw new Error('Add a message or up to four screenshots. Text is limited to 12,000 characters.');
@@ -239,14 +261,16 @@ class ClaudeService {
     if (!fromQueue && (this.busy || this.promoting || this.maintaining || this.queue().length)) {
       const queue = this.session().queued ||= [];
       if (queue.length >= 10) throw new Error('The queue is full. Remove a queued message or wait for Claude.');
-      const item = { id: randomUUID(), text: text.trim(), images: validated };
+      const item = { id: randomUUID(), text: text.trim(), images: validated.map(image => this.attachments.store(image)) };
       queue.push(item);
       try { this.save(); } catch (error) { queue.pop(); throw error; }
       this.queueChanged(); return { queued: true };
     }
+    const item = { id: randomUUID(), role: 'You', text: text.trim(), time: Date.now(), images: validated.map(image => this.attachments.store(image)) };
     this.busy = true; this.controller = new AbortController();
-    this.add('You', text.trim(), randomUUID(), validated);
-    try { this.save(); } catch (error) { this.busy = false; this.controller = null; throw error; }
+    this.session().messages.push(item);
+    try { this.save(); } catch (error) { this.session().messages.pop(); this.busy = false; this.controller = null; throw error; }
+    this.emit('message', item);
     this.emit('busy', true);
     const content = validated.map(image => ({ type: 'image', source: { type: 'base64', media_type: image.type, data: image.data } }));
     if (text.trim()) content.push({ type: 'text', text: text.trim() });

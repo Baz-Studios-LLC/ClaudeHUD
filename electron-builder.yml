@@ -9,19 +9,22 @@ files:
   - renderer.js
   - message-format.js
   - claude-service.js
+  - attachment-store.js
   - context-usage.js
   - preferences.js
   - updater.js
   - index.html
   - style.css
   - icon.png
+  - assets/app-icon.png
+  - assets/tray-icon.png
   - package.json
 asar: true
 win:
   target:
     - target: nsis
       arch: [x64]
-  icon: icon.png
+  icon: assets/app-icon.png
 nsis:
   oneClick: false
   perMachine: false

@@ -1,10 +1,11 @@
-const { app, BrowserWindow, ipcMain, globalShortcut, screen, Tray, Menu, nativeImage, dialog, desktopCapturer, clipboard, shell } = require('electron');
+const { app, BrowserWindow, ipcMain, globalShortcut, screen, Tray, Menu, nativeImage, dialog, desktopCapturer, clipboard, shell, protocol } = require('electron');
 const { captureGame } = require('./game-capture');
 const { ClaudeService } = require('./claude-service');
 const { createUpdater } = require('./updater');
 const { Preferences, fitBounds } = require('./preferences');
 const path = require('node:path');
 const fs = require('node:fs');
+protocol.registerSchemesAsPrivileged([{ scheme: 'hud-image', privileges: { standard: true, secure: true, supportFetchAPI: true } }]);
 let panel, toast, timer, tray;
 let claude;
 let updates;
@@ -157,14 +158,7 @@ function collapseOnBlur() {
   return Promise.resolve();
 }
 function createTrayIcon() {
-  const size = 32;
-  const pixels = nativeImage.createFromPath(path.join(__dirname, 'icon.png')).resize({ width: size, height: size }).toBitmap();
-  for (let offset = 0; offset < pixels.length; offset += 4) {
-    // Tint the supplied white artwork with Claude orange; preserve edge transparency.
-    const alpha = pixels[offset + 3] / 255;
-    pixels[offset] = Math.round(87 * alpha); pixels[offset + 1] = Math.round(119 * alpha); pixels[offset + 2] = Math.round(217 * alpha);
-  }
-  return nativeImage.createFromBitmap(pixels, { width: size, height: size, scaleFactor: 1 });
+  return nativeImage.createFromPath(path.join(__dirname, 'assets', 'tray-icon.png'));
 }
 function setupTray() {
   tray = new Tray(createTrayIcon()); tray.setToolTip('ClaudeHUD');
@@ -188,6 +182,15 @@ function bindShortcut(value) {
   return true;
 }
 app.whenReady().then(async () => {
+  protocol.handle('hud-image', async request => {
+    try {
+      const url = new URL(request.url);
+      if (url.hostname !== 'image' || !claude) return new Response(null, { status: 404 });
+      const file = claude.attachments.path(url.pathname.slice(1));
+      const type = { png: 'image/png', jpg: 'image/jpeg', webp: 'image/webp', gif: 'image/gif' }[path.extname(file).slice(1)];
+      return new Response(await fs.promises.readFile(file), { headers: { 'Content-Type': type, 'Cache-Control': 'private, max-age=31536000' } });
+    } catch { return new Response(null, { status: 404 }); }
+  });
   if (!ownsInstance) return;
   if (!smoke) {
     const previous = path.join(app.getPath('appData'), 'claudhud', 'conversations.json');
@@ -205,7 +208,7 @@ app.whenReady().then(async () => {
   const size = expanded ? expandedSize : compactSize;
   panel = new BrowserWindow({ ...windowOptions(size.width, size.height), minWidth: expanded ? 380 : compactSize.width, minHeight: expanded ? 520 : compactSize.height, resizable: expanded, focusable: expanded, x: bounds.x, y: bounds.y });
   panel.setOpacity(saved.opacity);
-  panel.setIcon(createTrayIcon());
+  panel.setIcon(nativeImage.createFromPath(path.join(__dirname, 'assets', 'app-icon.png')));
   panel.webContents.on('context-menu', (_event, params) => {
     if (contextMenuOpen) return;
     const template = textMenuTemplate(params, panel.webContents);
@@ -266,6 +269,13 @@ app.whenReady().then(async () => {
       if (replacement !== 'the' || dictionaryWord !== 'teh' || !spellingMenu.find(item => item.role === 'paste').enabled) throw new Error('Spelling menu failed');
       if (textMenuTemplate({ isEditable: false, selectionText: '', editFlags: {} }, {}).length) throw new Error('Empty context menu');
       fs.mkdirSync(path.join(__dirname, 'artifacts'), { recursive: true });
+      claude = new ClaudeService({ storage: path.join(app.getPath('userData'), 'image-test.json'), emit() {} });
+      const storedImage = claude.attachments.store({ type: 'image/png', data: fs.readFileSync(path.join(__dirname, 'assets', 'app-icon.png')).toString('base64') });
+      const imageLoaded = await panel.webContents.executeJavaScript(`new Promise(resolve => {
+        const image = new Image(); image.onload = () => resolve(image.naturalWidth > 0); image.onerror = () => resolve(false);
+        image.src = ${JSON.stringify(storedImage.url)};
+      })`);
+      if (!imageLoaded) throw new Error('Stored screenshot could not be displayed');
       panel.webContents.send('claude-event', { type: 'snapshot', data: { project: 'C:\\Addons\\TestAddon', connection: { ready: true }, busy: false, messages: [] } });
       panel.webContents.send('claude-event', { type: 'message', data: { id: 'test-message', role: 'Claude', text: 'Connected UI test response\n```lua\n  print("Hello, Azeroth!")\n-- <script> stays literal\n```', time: Date.now() } });
       panel.webContents.send('claude-event', { type: 'permission', data: { id: 'test-permission', tool: 'Write', input: { file_path: 'TestAddon.lua', content: '-- UI test only' } } });

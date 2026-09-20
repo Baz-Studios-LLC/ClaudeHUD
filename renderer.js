@@ -30,7 +30,7 @@ function renderQueue(items = []) {
     row.append(text);
     if (item.images?.length) {
       const images = document.createElement('div'); images.className = 'queued-images';
-      for (const attachment of item.images) { const image = document.createElement('img'); image.src = `data:${attachment.type};base64,${attachment.data}`; image.alt = 'Queued screenshot'; images.append(image); }
+      for (const attachment of item.images) { const image = document.createElement('img'); image.src = attachment.file ? `hud-image://image/${attachment.file}` : `data:${attachment.type};base64,${attachment.data}`; image.alt = 'Queued screenshot'; images.append(image); }
       row.append(images);
     }
     const buttons = document.createElement('div'); buttons.className = 'queued-actions';
@@ -259,7 +259,7 @@ function message(item, follow = true) {
     if (item.images?.length) {
       const images = document.createElement('div'); images.className = 'message-images';
       for (const attachment of item.images) {
-        const image = document.createElement('img'); image.src = `data:${attachment.type};base64,${attachment.data}`; image.alt = 'Attached screenshot'; image.loading = 'lazy'; images.append(image);
+        const image = document.createElement('img'); image.src = attachment.file ? `hud-image://image/${attachment.file}` : `data:${attachment.type};base64,${attachment.data}`; image.alt = 'Attached screenshot'; image.loading = 'lazy'; images.append(image);
       }
       body.append(images);
     }
@@ -485,7 +485,7 @@ function renderAttachments() {
   $('#attachments').replaceChildren(); $('#attachments').hidden = !attachments.length;
   for (const attachment of attachments) {
     const preview = document.createElement('div'); preview.className = 'attachment';
-    const image = document.createElement('img'); image.src = `data:${attachment.type};base64,${attachment.data}`; image.alt = 'Screenshot ready to send';
+    const image = document.createElement('img'); image.src = attachment.file ? `hud-image://image/${attachment.file}` : `data:${attachment.type};base64,${attachment.data}`; image.alt = 'Screenshot ready to send';
     const remove = document.createElement('button'); remove.type = 'button'; remove.textContent = '×'; remove.setAttribute('aria-label', 'Remove screenshot');
     remove.onclick = () => { attachments = attachments.filter(item => item !== attachment); renderAttachments(); };
     preview.append(image, remove); $('#attachments').append(preview);

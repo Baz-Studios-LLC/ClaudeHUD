@@ -10,6 +10,35 @@ function fixture(queryFactory) {
   service.connection = { ready: true }; service.selectProject(root); return { service, events, root };
 }
 async function idle(service) { for (let i = 0; i < 100 && service.busy; i++) await new Promise(r => setTimeout(r, 10)); assert.equal(service.busy, false); }
+test('legacy screenshots migrate losslessly and preserve the original backup', () => {
+  const { service, root } = fixture(() => {});
+  try {
+    const image = { type: 'image/png', data: Buffer.alloc(1024 * 1024, 7).toString('base64') };
+    service.session().messages = Array.from({ length: 12 }, (_, i) => ({ id: String(i), role: 'You', text: 'Screenshot', images: [image] }));
+    service.session().queued = [{ id: 'queued', text: 'Later', images: [image] }];
+    fs.writeFileSync(service.storage, JSON.stringify(service.data));
+    const originalSize = fs.statSync(service.storage).size;
+    const restored = new ClaudeService({ storage: service.storage, emit() {} });
+    assert.equal(restored.storageError, undefined);
+    assert.equal(fs.statSync(service.storage + '.legacy-backup').size, originalSize);
+    assert.ok(fs.statSync(service.storage).size < 10000);
+    assert.equal(fs.readdirSync(restored.attachments.directory).length, 1);
+    assert.deepEqual(restored.attachments.hydrate(restored.session().messages[0].images[0]), image);
+    assert.deepEqual(restored.attachments.hydrate(restored.queue()[0].images[0]), image);
+    assert.ok(JSON.stringify(restored.snapshot()).length < 10000);
+    assert.throws(() => restored.attachments.path('../secret'), /Invalid/);
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+test('failed persistence never emits or retains a sent message', async () => {
+  const { service, events, root } = fixture(() => { throw new Error('Should not start'); });
+  try {
+    service.save = () => { throw new Error('Disk full'); };
+    await assert.rejects(service.send('Retry this'), /Disk full/);
+    assert.equal(service.session().messages.length, 0);
+    assert.equal(events.filter(event => event.type === 'message').length, 0);
+    assert.equal(service.busy, false);
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
 test('quota lookup reports percentages and scoped models, caches, and closes idle query', async () => {
   let closed = 0, calls = 0;
   const { service, root } = fixture(() => {
@@ -151,7 +180,7 @@ test('failures pause queued screenshots and switching folders keeps queues separ
   const image = { type: 'image/png', data: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aWQAAAABJRU5ErkJggg==' };
   await service.send({ text: 'Look', images: [image] });
   fail(); await idle(service);
-  assert.deepEqual(service.queue()[0].images, [image]);
+  assert.deepEqual(service.queue()[0].images.map(item => service.attachments.hydrate(item)), [image]);
   const other = path.join(root, 'other'); fs.mkdirSync(other);
   service.selectProject(other); assert.equal(service.queue().length, 0);
   service.selectProject(root); assert.equal(service.queue()[0].text, 'Look');
@@ -262,7 +291,9 @@ test('screenshots are sent as image blocks and saved even without text', async (
   assert.equal(received.message.content[0].type, 'image');
   assert.deepEqual(received.message.content[0].source, { type: 'base64', media_type: image.type, data: image.data });
   const restored = new ClaudeService({ storage: path.join(root, 'state.json'), emit() {} });
-  assert.deepEqual(restored.session().messages[0].images, [image]);
+  assert.deepEqual(restored.session().messages[0].images.map(item => restored.attachments.hydrate(item)), [image]);
+  await service.send({ text: 'Queued screenshot', images: restored.session().messages[0].images }, true); await idle(service);
+  assert.deepEqual(received.message.content[0].source, { type: 'base64', media_type: image.type, data: image.data });
   await assert.rejects(service.send({ text: 'bad', images: [{ type: 'image/png', data: 'bm90IGFuIGltYWdl' }] }));
   await assert.rejects(service.send({ text: '', images: Array(5).fill(image) }));
   assert.equal(service.busy, false);
