@@ -16,6 +16,56 @@ class ClaudeService {
     if (!this.data.sessions || typeof this.data.sessions !== 'object') this.data = { project: null, sessions: {} };
   }
   modelState() { return { model: this.data.model || 'default', activeModel: this.session()?.activeModel || null }; }
+  async usage() {
+    if (this.usagePending) return this.usagePending;
+    if (this.usageCache && Date.now() - this.usageCache.fetchedAt < 60000) return this.usageCache;
+    this.usagePending = this.fetchUsage();
+    try { return await this.usagePending; } finally { this.usagePending = null; }
+  }
+  async fetchUsage() {
+    if (!this.connection.ready) throw new Error('Reconnect Claude to check usage.');
+    let stream = this.activeQuery, release, timer, draining;
+    const owned = !stream;
+    try {
+      if (owned) {
+        const query = this.queryFactory || (await import('@anthropic-ai/claude-agent-sdk')).query;
+        const wait = new Promise(resolve => { release = resolve; });
+        stream = query({ prompt: (async function* () { await wait; })(), options: {
+          cwd: this.data.project || os.homedir(), pathToClaudeCodeExecutable: this.executable,
+          persistSession: false, tools: [], settingSources: [], strictMcpConfig: true, mcpServers: {},
+          spawnClaudeCodeProcess: opts => spawn(opts.command, opts.args, { cwd: opts.cwd, env: opts.env, signal: opts.signal, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] })
+        } });
+        draining = (async () => { for await (const event of stream) { /* No model prompt is sent. */ } })().catch(() => {});
+      }
+      const method = stream.usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET;
+      if (!method) throw new Error('Update Claude Code to view account usage.');
+      const report = await Promise.race([method.call(stream, { skipBehaviors: true }), new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('Usage lookup timed out. Try again.')), 15000); })]);
+      const limits = report.rate_limits, rows = [];
+      const add = (label, value) => { if (value && Number.isFinite(value.utilization)) rows.push({ label, used: value.utilization, resetsAt: value.resets_at }); };
+      add('5-hour limit', limits?.five_hour); add('Weekly · all models', limits?.seven_day);
+      if (limits?.model_scoped?.length) for (const row of limits.model_scoped) add(`Weekly · ${row.display_name}`, row);
+      else { add('Weekly · Opus', limits?.seven_day_opus); add('Weekly · Sonnet', limits?.seven_day_sonnet); }
+      this.usageCache = { rows, plan: report.subscription_type, fetchedAt: Date.now() };
+      return this.usageCache;
+    } finally { clearTimeout(timer); if (owned) { release?.(); stream?.close?.(); } }
+  }
+  async compact() {
+    if (this.busy || this.promoting || this.maintaining || this.queue().length) throw new Error('Finish the current task and queued messages before compacting.');
+    if (!this.session()?.sessionId) throw new Error('Start a conversation before compacting.');
+    this.maintaining = true;
+    let success = false;
+    const token = this.stopToken;
+    try {
+      await this.send('Prepare detailed handoff notes in your response before this conversation is compacted. Preserve the goal, user preferences, decisions, changed files, tests and results, unresolved problems, and exact next steps. Distinguish completed work from proposed work. Do not edit files or start new work.', true);
+      if (!await this.running || token !== this.stopToken) return;
+      await this.send('/compact Preserve the detailed handoff notes, user requirements, decisions, changed files, test results, outstanding problems, and next steps.', true);
+      success = await this.running;
+      if (success) this.emit('complete', { text: 'Handoff notes prepared and conversation compacted.' });
+    } finally {
+      this.maintaining = false; this.emit('busy', false);
+      if (success && token === this.stopToken) await this.drainQueue();
+    }
+  }
   queue() { return this.session()?.queued || []; }
   queueChanged() { this.emit('queue', this.queue()); }
   beginQueuedEdit(id) {
@@ -186,7 +236,7 @@ class ClaudeService {
       if (!valid) throw new Error('The pasted image is not a valid supported image file.');
       return { type: image.type, data: image.data };
     });
-    if (!fromQueue && (this.busy || this.promoting || this.queue().length)) {
+    if (!fromQueue && (this.busy || this.promoting || this.maintaining || this.queue().length)) {
       const queue = this.session().queued ||= [];
       if (queue.length >= 10) throw new Error('The queue is full. Remove a queued message or wait for Claude.');
       const item = { id: randomUUID(), text: text.trim(), images: validated };
@@ -204,7 +254,7 @@ class ClaudeService {
     this.running = this.run(prompt);
   }
   async run(prompt) {
-    let stream, current, finalReceived = false, succeeded = false;
+    let stream, current, finalReceived = false, succeeded = false, compacted = false;
     try {
       const query = this.queryFactory || (await import('@anthropic-ai/claude-agent-sdk')).query;
       const options = {
@@ -223,10 +273,12 @@ class ClaudeService {
       if (this.data.model && this.data.model !== 'default') options.model = this.data.model;
       if (this.showThinking()) options.thinking = { type: 'enabled', display: 'summarized' };
       stream = query({ prompt, options });
+      this.activeQuery = stream;
       for await (const event of stream) {
         if (event.session_id) this.session().sessionId = event.session_id;
         if (event.type === 'system' && event.subtype === 'init') this.reportModel(event.model);
         if (event.type === 'system' && event.subtype === 'compact_boundary') {
+          compacted = true;
           this.session().context = null; this.emit('context', null);
         }
         if (event.type === 'stream_event') {
@@ -264,24 +316,27 @@ class ClaudeService {
           finalReceived = true;
           if (event.is_error || event.subtype !== 'success') throw new Error(event.errors?.join('\n') || event.result || 'Claude could not finish this task.');
           succeeded = true;
-          if (!this.queue().length) this.emit('complete', { text: event.result || 'Claude finished.' });
+          if (!this.queue().length && !this.maintaining) this.emit('complete', { text: event.result || 'Claude finished.' });
         }
       }
       if (!finalReceived && !this.controller.signal.aborted) throw new Error('Claude disconnected before finishing. You can retry your message.');
+      if (typeof prompt === 'string' && prompt.startsWith('/compact ') && !compacted && !this.controller.signal.aborted) throw new Error('Claude Code did not confirm compaction. Your notes are preserved; the context was not cleared.');
     } catch (error) {
       succeeded = false;
       const stopped = this.controller.signal.aborted;
       this.add('System', stopped ? 'Task stopped. Changes already made remain in your addon folder.' : `Claude error: ${error.message}`);
       this.emit(stopped ? 'stopped' : 'failure', { text: stopped ? 'Task stopped' : error.message });
     } finally {
-      const continueQueue = succeeded && !this.controller.signal.aborted && !this.promoting;
+      const continueQueue = succeeded && !this.controller.signal.aborted && !this.promoting && !this.maintaining;
+      this.activeQuery = null;
       try { stream?.close?.(); } catch { /* The process may already have exited. */ }
       for (const request of [...this.pending.values()]) request.finish({ behavior: 'deny', message: 'Task ended.' });
       this.busy = false; this.controller = null;
       try { this.save(); } catch (error) { this.emit('failure', { text: `Could not save conversation: ${error.message}` }); }
-      this.emit('busy', false);
+      this.emit('busy', !!this.maintaining);
       if (continueQueue) await this.drainQueue();
     }
+    return succeeded;
   }
 }
 module.exports = { ClaudeService };

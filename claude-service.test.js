@@ -10,6 +10,40 @@ function fixture(queryFactory) {
   service.connection = { ready: true }; service.selectProject(root); return { service, events, root };
 }
 async function idle(service) { for (let i = 0; i < 100 && service.busy; i++) await new Promise(r => setTimeout(r, 10)); assert.equal(service.busy, false); }
+test('quota lookup reports percentages and scoped models, caches, and closes idle query', async () => {
+  let closed = 0, calls = 0;
+  const { service, root } = fixture(() => {
+    const stream = (async function* () {})();
+    stream.close = () => { closed++; };
+    stream.usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET = async () => { calls++; return { subscription_type: 'team', rate_limits: { five_hour: { utilization: 20 }, seven_day: { utilization: 10 }, model_scoped: [{ display_name: 'Fable', utilization: 12 }] } }; };
+    return stream;
+  });
+  try {
+    const result = await service.usage(); await service.usage();
+    assert.deepEqual(result.rows.map(row => row.used), [20, 10, 12]);
+    assert.equal(result.rows[2].label, 'Weekly · Fable'); assert.equal(calls, 1); assert.equal(closed, 1);
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+test('compaction writes notes first, resumes session, and requires a compact boundary', async () => {
+  const prompts = []; let boundary = true;
+  const { service, events, root } = fixture(({ prompt, options }) => (async function* () {
+    prompts.push(prompt); assert.equal(options.resume, 'test-session');
+    if (prompt.startsWith('/compact') && boundary) yield { type: 'system', subtype: 'compact_boundary' };
+    yield { type: 'assistant', message: { content: [{ type: 'text', text: 'Handoff notes.' }] } };
+    yield { type: 'result', subtype: 'success', result: 'Done' };
+  })());
+  try {
+    service.session().sessionId = 'test-session';
+    await service.compact();
+    assert.match(prompts[0], /handoff notes/); assert.match(prompts[1], /^\/compact /);
+    assert.equal(events.filter(event => event.type === 'complete').length, 1);
+    assert.equal(service.maintaining, false);
+    boundary = false; await service.compact();
+    assert.ok(events.some(event => event.type === 'failure' && /did not confirm/.test(event.data.text)));
+    assert.equal(events.filter(event => event.type === 'complete').length, 1);
+    service.busy = true; await assert.rejects(service.compact(), /Finish the current task/); service.busy = false;
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
 test('thinking summaries stream, reconcile without duplicates, and survive restart', async () => {
   let options;
   const { service, events, root } = fixture(args => {

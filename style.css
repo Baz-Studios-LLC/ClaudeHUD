@@ -210,6 +210,18 @@ kbd{font:inherit;color:#c4beb2}
 #context-meter::-webkit-progress-value{background:#d97757;border-radius:4px;transition:width .3s ease}
 .context-high #context-label{color:#efb9a2}
 .context-high #context-meter::-webkit-progress-value{background:#efb9a2}
+.context-usage{position:relative}
+.context-tools{display:flex;align-items:center;gap:6px}
+.context-tools button,.usage-heading button{border:0;background:transparent;color:#b0aea5;border-radius:4px;padding:2px 5px;line-height:18px}
+.context-tools button:hover:not(:disabled),.usage-heading button:hover{background:#34332e;color:#efb9a2}
+.context-tools button:disabled{opacity:.4}
+.context-tools button{display:inline-grid;place-items:center;width:24px;height:24px}
+#usage-popup{position:absolute;bottom:calc(100% + 8px);left:0;width:min(330px,100%);padding:14px;background:#22211f;border:1px solid #514338;border-radius:10px;box-shadow:0 8px 24px #0008;z-index:10;font-size:12px;color:#ccc9bf;max-height:50vh;overflow:auto}
+.usage-heading{display:flex;align-items:center;gap:8px;margin-bottom:10px}.usage-heading strong{flex:1}
+.usage-row{margin:10px 0}.usage-row small{color:#b0aea5;font-size:10px}
+.usage-row progress{display:block;width:100%;height:5px;margin:6px 0;appearance:none}
+.usage-row progress::-webkit-progress-bar{background:#34332e;border-radius:3px}
+.usage-row progress::-webkit-progress-value{background:#d97757;border-radius:3px}
 #attachments{grid-column:1/-1;display:flex;gap:8px;overflow-x:auto;padding:2px 0 10px}
 .attachment{position:relative;flex-shrink:0;width:70px;height:55px}
 .attachment img{width:100%;height:100%;object-fit:contain;background:#141413;border:1px solid #685044;border-radius:6px}

@@ -126,6 +126,7 @@ $('#chat-search-input').onkeydown = event => {
 $('#chat-search-prev').onclick = () => selectSearchMatch(-1);
 $('#chat-search-next').onclick = () => selectSearchMatch(1);
 document.addEventListener('keydown', event => {
+  if (event.key === 'Escape' && !$('#usage-popup').hidden) { event.preventDefault(); event.stopImmediatePropagation(); showUsage(false); return; }
   if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'f') { event.preventDefault(); showChatSearch(true); }
   if (event.key === 'Escape' && ($('#chat-search-input').value || document.activeElement === $('#chat-search-input'))) { event.preventDefault(); event.stopImmediatePropagation(); showChatSearch(false); }
 });
@@ -161,6 +162,7 @@ function contextUsage(context) {
   $('#context-usage').classList.toggle('context-high', percent >= 80);
 }
 function controls() {
+  $('#compact-chat').disabled = busy || submitting || !connected || !project || !$('#message-queue').hidden;
   $('#send').disabled = submitting || pasting > 0 || capturing || !connected || !project;
   const queueing = busy || !$('#message-queue').hidden;
   $('#send').title = queueing ? 'Queue message' : 'Send message';
@@ -175,6 +177,36 @@ function controls() {
   $('#update-ready').title = busy ? 'Update downloaded. Wait for Claude to finish.' : 'Install downloaded update and restart ClaudeHUD';
   $('#permission-mode').title = busy ? 'Stop the current task to change mode' : modeDescriptions[permissionMode];
 }
+let usageLoading = false;
+async function loadUsage() {
+  if (usageLoading) return;
+  usageLoading = true; $('#usage-refresh').disabled = true;
+  $('#usage-content').textContent = 'Checking account usage…';
+  try {
+    const report = await bridge.claude('usage');
+    if (report?.error) throw new Error(report.error);
+    const container = $('#usage-content'); container.replaceChildren();
+    if (!report?.rows?.length) container.textContent = 'Account quotas are unavailable for this connection.';
+    for (const row of report?.rows || []) {
+      const section = document.createElement('div'); section.className = 'usage-row';
+      const label = document.createElement('div'); label.textContent = `${row.label} · ${Math.round(row.used)}% used`;
+      const meter = document.createElement('progress'); meter.max = 100; meter.value = Math.max(0, Math.min(100, row.used)); meter.setAttribute('aria-label', row.label);
+      const reset = document.createElement('small'), date = new Date(row.resetsAt);
+      reset.textContent = row.resetsAt && Number.isFinite(date.getTime()) ? `Resets ${date.toLocaleString([], { weekday: 'short', hour: 'numeric', minute: '2-digit' })}` : 'Reset time unavailable';
+      section.append(label, meter, reset); container.append(section);
+    }
+  } catch (error) { $('#usage-content').textContent = error.message; }
+  finally { usageLoading = false; $('#usage-refresh').disabled = false; }
+}
+function showUsage(open) {
+  $('#usage-popup').hidden = !open; $('#usage-toggle').setAttribute('aria-expanded', String(open));
+  if (open) void loadUsage();
+}
+$('#usage-toggle').onclick = () => showUsage($('#usage-popup').hidden);
+$('#usage-close').onclick = () => showUsage(false);
+$('#usage-refresh').onclick = loadUsage;
+$('#compact-chat').onclick = () => claude('compact');
+document.addEventListener('pointerdown', event => { if (!event.target.closest('#usage-popup, #usage-toggle')) showUsage(false); });
 function renderMessageText(container, text) {
   const parts = splitMessage(text);
   parts.forEach((part, index) => {

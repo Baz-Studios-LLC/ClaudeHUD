@@ -531,6 +531,8 @@ ipcMain.handle('claude', async (event, action, value) => {
       } finally { nativeDialogOpen = false; panel.focus(); }
     }
     if (action === 'send') await claude.send(value);
+    if (action === 'usage') return await claude.usage();
+    if (action === 'compact') { void claude.compact().catch(error => claudeEvent('failure', { text: error.message })); }
     if (action === 'remove-queued') claude.removeQueued(value);
     if (action === 'edit-queued') claude.beginQueuedEdit(value);
     if (action === 'save-queued') await claude.finishQueuedEdit(value);
