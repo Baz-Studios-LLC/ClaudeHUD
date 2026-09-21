@@ -1,6 +1,6 @@
 {
   "name": "claudehud",
-  "version": "0.1.20",
+  "version": "0.1.21",
   "description": "A quiet companion for building WoW addons with Claude",
   "main": "main.js",
   "private": true,

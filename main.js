@@ -315,6 +315,18 @@ app.whenReady().then(async () => {
         return { text: block.querySelector('code').textContent, label: copy.textContent, unsafe: !!block.querySelector('script') };
       })()`);
       if (codeResult.text !== '  print("Hello, Azeroth!")\n-- <script> stays literal\n' || codeResult.label !== 'Copied!' || codeResult.unsafe || smokeCopiedCode !== codeResult.text) throw new Error('Code formatting/copy failed');
+      const horizontalLayout = await panel.webContents.executeJavaScript(`(() => {
+        const chat = document.querySelector('.messages');
+        const row = document.createElement('article'); row.className = 'message';
+        row.innerHTML = '<div class="avatar">C</div><div class="message-body"><div class="markdown"><p></p><pre></pre><table><tbody><tr></tr></tbody></table></div><div class="code-block"><pre></pre></div></div>';
+        row.querySelector('p').textContent = 'LongLink'.repeat(200);
+        row.querySelectorAll('pre').forEach(pre => pre.textContent = 'wide code '.repeat(200));
+        for (let i = 0; i < 20; i++) { const cell = document.createElement('td'); cell.textContent = 'Column ' + i; row.querySelector('tr').append(cell); }
+        chat.append(row);
+        const result = { fits: chat.scrollWidth <= chat.clientWidth + 1, verticalOnly: getComputedStyle(chat).overflowX === 'hidden', localScroll: [...row.querySelectorAll('pre, table')].every(el => el.scrollWidth > el.clientWidth) };
+        row.remove(); return result;
+      })()`);
+      if (!horizontalLayout.fits || !horizontalLayout.verticalOnly || !horizontalLayout.localScroll) throw new Error('Conversation horizontal overflow: ' + JSON.stringify(horizontalLayout));
       panel.webContents.send('update-status', { phase: 'downloading', version: app.getVersion(), detail: 'Downloading…' });
       await new Promise(resolve => setTimeout(resolve, 100));
       if (!await panel.webContents.executeJavaScript(`document.querySelector('#update-ready').hidden`)) throw new Error('Update chip appeared before download finished');

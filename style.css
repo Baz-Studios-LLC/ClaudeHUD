@@ -27,8 +27,8 @@ button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid 
 .demo-banner>span{font-size:18px}
 .demo-banner p{margin:0}
 .demo-banner strong{color:#ecb49e;font-weight:500}
-.messages{flex:1;overflow:auto;padding:0 21px 20px;scrollbar-width:thin;scrollbar-color:#48453e transparent;min-height:0}
-.conversation-view{position:relative;display:flex;flex:1;min-height:0}
+.messages{flex:1;min-width:0;overflow-x:hidden;overflow-y:auto;padding:0 21px 20px;scrollbar-width:thin;scrollbar-color:#48453e transparent;min-height:0}
+.conversation-view{position:relative;display:flex;flex:1;min-width:0;min-height:0}
 #jump-latest{position:absolute;bottom:10px;left:50%;transform:translateX(-50%);padding:7px 12px;border:1px solid #78503d;border-radius:18px;background:#30261f;color:#efb9a2;font-size:11px;white-space:nowrap;box-shadow:0 2px 8px #0005}
 #jump-latest:hover{background:#443127}
 .welcome{padding:30px 0 24px}
@@ -74,6 +74,7 @@ body:not(.show-thinking) .thinking,body:not(.show-thinking) .thinking-only{displ
 .markdown a{color:#efb9a2;text-decoration:underline}
 .markdown hr{border:0;border-top:1px solid #454039;margin:12px 0}
 .markdown table{display:block;overflow-x:auto;border-collapse:collapse;margin:10px 0}
+.markdown pre{max-width:100%;overflow-x:auto;white-space:pre}
 .markdown th,.markdown td{border:1px solid #454039;padding:5px 8px;text-align:left}
 .demo-button{margin-top:6px;background:#352820;border:1px solid #694737;border-radius:7px;color:#efb9a2;padding:10px 12px;font-size:11px;width:100%;text-align:left}
 .demo-button span{float:right}
