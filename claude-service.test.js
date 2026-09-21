@@ -10,6 +10,75 @@ function fixture(queryFactory) {
   service.connection = { ready: true }; service.selectProject(root); return { service, events, root };
 }
 async function idle(service) { for (let i = 0; i < 100 && service.busy; i++) await new Promise(r => setTimeout(r, 10)); assert.equal(service.busy, false); }
+test('Desktop pins control selection and follow changing CLI IDs without creating threads', async () => {
+  const calls = [];
+  const { service, root } = fixture(({ options }) => (async function* () {
+    calls.push(options); yield { type: 'system', session_id: options.resume };
+    yield { type: 'result', subtype: 'success', result: 'Done' };
+  })());
+  try {
+    const oldId = '11111111-1111-4111-8111-111111111111', nextId = '22222222-2222-4222-8222-222222222222';
+    let pins = [{ id: 'local_33333333-3333-4333-8333-333333333333', cliId: oldId, title: 'Pinned Desktop title', project: root, priorIds: [] }];
+    service.pinnedProvider = () => pins;
+    service.sessionReader = {
+      getSessionInfo: async id => ({ sessionId: id, cwd: root, summary: 'Code title' }),
+      getSessionMessages: async id => [{ type: 'user', uuid: id, message: { content: `Current history ${id}` } }]
+    };
+    assert.equal(service.snapshot().messages.length, 0);
+    await assert.rejects(service.loadConversation(oldId), /Only pinned/);
+    await service.loadConversation(pins[0].id);
+    assert.equal(service.session().desktopSessionId, pins[0].id);
+    assert.equal(service.session().title, 'Pinned Desktop title');
+    pins[0].cliId = nextId;
+    await service.send('Continue'); await idle(service);
+    assert.equal(calls[0].resume, nextId); assert.equal(calls[0].forkSession, false);
+    assert.equal(service.session().sessionId, nextId);
+    assert.throws(() => service.newChat(), /Create and pin/);
+    assert.throws(() => service.selectProject(root), /pinned/);
+    pins = [];
+    assert.equal(service.snapshot().messages.length, 0);
+    await assert.rejects(service.send('No longer pinned'), /Select a pinned/);
+    assert.equal(calls.length, 1);
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+test('Desktop metadata reader excludes unpinned and archived entries', () => {
+  const { readDesktopPins } = require('./desktop-pins');
+  const root = fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'hud-pins-'));
+  try {
+    const folder = path.join(root, 'account', 'org'); fs.mkdirSync(folder, { recursive: true });
+    for (let i = 1; i <= 3; i++) {
+      const id = `${i}1111111-1111-4111-8111-111111111111`;
+      fs.writeFileSync(path.join(folder, `local_${id}.json`), JSON.stringify({ sessionId: `local_${id}`, cliSessionId: id, cwd: root, title: `Thread ${i}`, isStarred: i !== 2, isArchived: i === 3 }));
+    }
+    assert.deepEqual(readDesktopPins(root).map(pin => pin.title), ['Thread 1']);
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+test('resume refreshes external history before sending, retains queue and blocks unreadable history', async () => {
+  let started = 0;
+  const { service, events, root } = fixture(() => (async function* () {
+    started++;
+    assert.ok(service.session().messages.some(item => item.text === 'New Desktop discussion'));
+    yield { type: 'result', subtype: 'success', result: 'Done' };
+  })());
+  try {
+    service.session().sessionId = 'saved-session';
+    service.session().messages = [{ id: 'old', role: 'You', text: 'Old cache' }];
+    service.sessionReader = {
+      getSessionInfo: async id => ({ sessionId: id, summary: 'Desktop title' }),
+      getSessionMessages: async () => [{ uuid: 'new', type: 'user', message: { content: 'New Desktop discussion' } }]
+    };
+    service.session().queued = [{ id: 'q', text: 'Queued', images: [] }];
+    await service.refreshHistory();
+    assert.equal(service.queue()[0].id, 'q'); service.session().queued = [];
+    assert.equal(service.session().title, 'Desktop title');
+    assert.ok(events.some(event => event.type === 'history'));
+    await service.send('Follow up'); await idle(service); assert.equal(started, 1);
+    const count = service.session().messages.length;
+    service.sessionReader.getSessionMessages = async () => [];
+    await assert.rejects(service.send('Do not send'), /empty history/);
+    assert.equal(service.session().messages.length, count); assert.equal(started, 1); assert.equal(service.busy, false);
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
 test('legacy screenshots migrate losslessly and preserve the original backup', () => {
   const { service, root } = fixture(() => {});
   try {

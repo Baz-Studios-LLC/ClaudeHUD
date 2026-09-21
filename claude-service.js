@@ -8,7 +8,9 @@ const { latestContext, withContextLimit } = require('./context-usage');
 const { AttachmentStore } = require('./attachment-store');
 
 class ClaudeService {
-  constructor({ storage, emit, queryFactory, showThinking = () => false }) {
+  constructor({ storage, emit, queryFactory, sessionReader, pinnedProvider, showThinking = () => false }) {
+    this.pinnedProvider = pinnedProvider || null;
+    this.sessionReader = sessionReader;
     this.showThinking = showThinking;
     this.storage = storage; this.emit = emit; this.queryFactory = queryFactory;
     this.attachments = new AttachmentStore(storage);
@@ -120,7 +122,7 @@ class ClaudeService {
     this.queueChanged();
   }
   setModel(model) {
-    if (this.busy || this.promoting) throw new Error('Stop the current task before changing model.');
+    if (this.busy || this.promoting || this.syncing) throw new Error('Stop the current task before changing model.');
     if (!['default', 'claude-fable-5-1', 'claude-opus-5', 'claude-sonnet-5', 'claude-haiku-4-5'].includes(model)) throw new Error('Unknown model.');
     this.data.model = model;
     for (const session of Object.values(this.data.sessions)) session.activeModel = null;
@@ -133,39 +135,84 @@ class ClaudeService {
     this.session().activeModel = model;
     this.emit('model', this.modelState());
   }
-  snapshot() { return { ...this.modelState(), queued: this.queue(), context: this.session()?.context || null, permissionMode: this.data.permissionMode || 'default', project: this.data.project, title: this.session()?.title, messages: this.session()?.messages || [], connection: this.connection, busy: this.busy || !!this.promoting }; }
+  selectedPin() {
+    const session = this.session();
+    return this.pinnedProvider?.().find(pin => session?.desktopSessionId ? pin.id === session.desktopSessionId : pin.cliId === session?.sessionId || pin.priorIds.includes(session?.sessionId));
+  }
+  snapshot() {
+    let visible = true;
+    if (this.pinnedProvider) { try { const pin = this.selectedPin(); visible = !!pin && pin.cliId === this.session()?.sessionId; } catch { visible = false; } }
+    return { ...this.modelState(), queued: visible ? this.queue() : [], context: visible ? this.session()?.context || null : null, permissionMode: this.data.permissionMode || 'default', project: visible ? this.data.project : null, title: visible ? this.session()?.title : null, messages: visible ? this.session()?.messages || [] : [], connection: this.connection, busy: this.busy || !!this.promoting };
+  }
   setPermissionMode(mode) {
-    if (this.busy || this.promoting) throw new Error('Stop the current task before changing permission mode.');
+    if (this.busy || this.promoting || this.syncing) throw new Error('Stop the current task before changing permission mode.');
     if (!['default', 'auto', 'acceptEdits', 'plan', 'bypassPermissions'].includes(mode)) throw new Error('Unknown permission mode.');
     this.data.permissionMode = mode; this.save();
     return { mode };
   }
   async listConversations() {
+    if (this.pinnedProvider) return this.pinnedProvider();
     const { listSessions } = await import('@anthropic-ai/claude-agent-sdk');
     const sessions = await listSessions({ limit: 200 });
     return sessions.filter(item => item.cwd).map(item => ({ id: item.sessionId, title: item.customTitle || item.summary || 'Untitled conversation', project: item.cwd, modified: item.lastModified }));
   }
-  async loadConversation(id) {
-    if (this.busy || this.promoting) throw new Error('Stop the current task before loading a conversation.');
-    if (typeof id !== 'string' || !/^[a-f0-9-]{36}$/i.test(id)) throw new Error('Select a valid conversation.');
-    const { getSessionInfo, getSessionMessages } = await import('@anthropic-ai/claude-agent-sdk');
-    const info = await getSessionInfo(id);
-    if (!info?.cwd || !fs.existsSync(info.cwd)) throw new Error('The conversation’s project folder is no longer available.');
-    const history = await getSessionMessages(id);
-    const messages = history.filter(item => !item.parent_tool_use_id && ['user', 'assistant'].includes(item.type)).flatMap(item => {
+  async refreshHistory() {
+    const session = this.session();
+    const pin = this.pinnedProvider ? this.selectedPin() : null;
+    if (this.pinnedProvider && !pin) throw new Error('Select a pinned Claude Desktop conversation in Settings.');
+    const project = pin?.project || this.data.project, id = pin?.cliId || session?.sessionId;
+    if (!id || (this.queryFactory && !this.sessionReader)) return;
+    if (this.syncing) throw new Error('Conversation history is still syncing. Try again in a moment.');
+    this.syncing = true;
+    try {
+      const reader = this.sessionReader || await import('@anthropic-ai/claude-agent-sdk');
+      const info = await reader.getSessionInfo(id, { dir: project });
+      if (!info) throw new Error('The saved Claude Code thread could not be found. Load the correct conversation in Settings.');
+      const history = await reader.getSessionMessages(id, { dir: project });
+      if (!history.length) throw new Error('Claude Code returned an empty history. Sending has been stopped to protect this conversation.');
+      if (this.session() !== session) throw new Error('The conversation changed while syncing. Please send again.');
+      if (pin && !this.pinnedProvider().some(current => current.id === pin.id && current.cliId === id)) throw new Error('Desktop changed this thread while syncing. Please try again.');
+      const messages = this.historyMessages(history);
+      let context = null;
+      for (const item of history) if (item.type === 'assistant' && !item.parent_tool_use_id) context = latestContext(item.message, context);
+      const previous = { ...session };
+      if (fs.existsSync(this.storage) && !fs.existsSync(this.storage + '.sync-backup')) fs.copyFileSync(this.storage, this.storage + '.sync-backup');
+      if (project !== this.data.project) throw new Error('Desktop changed the project folder. Reselect the pinned conversation.');
+      Object.assign(session, { messages, context, sessionId: id, ...(pin ? { desktopSessionId: pin.id } : {}), title: pin?.title || info.customTitle || info.summary || session.title });
+      try { this.save(); } catch (error) { Object.assign(session, previous); throw error; }
+      this.emit('history', this.snapshot());
+    } finally { this.syncing = false; }
+  }
+  historyMessages(history) {
+    return history.filter(item => !item.parent_tool_use_id && ['user', 'assistant'].includes(item.type)).flatMap(item => {
       const content = item.message?.content;
       const thinking = item.type === 'assistant' && Array.isArray(content) ? content.filter(block => block.type === 'thinking' && typeof block.thinking === 'string').map(block => block.thinking).join('\n\n') : '';
       const text = typeof content === 'string' ? content : Array.isArray(content) ? content.filter(block => block.type === 'text').map(block => block.text).join('\n') : '';
       const images = Array.isArray(content) ? content.filter(block => block.type === 'image' && block.source?.type === 'base64' && ['image/png', 'image/jpeg', 'image/webp', 'image/gif'].includes(block.source.media_type)).map(block => ({ type: block.source.media_type, data: block.source.data })) : [];
-      return text || images.length || thinking ? [{ id: item.uuid, role: item.type === 'user' ? 'You' : 'Claude', text, images, thinking, time: null }] : [];
+      return text || images.length || thinking ? [{ id: item.uuid, role: item.type === 'user' ? 'You' : 'Claude', text, images, thinking, time: item.timestamp || null }] : [];
     });
-    if (this.busy || this.promoting) throw new Error('Stop the current task before loading a conversation.');
+  }
+  async loadConversation(id) {
+    if (this.busy || this.promoting || this.syncing) throw new Error('Stop the current task before loading a conversation.');
+    const pin = this.pinnedProvider ? this.pinnedProvider().find(item => item.id === id) : null;
+    if (this.pinnedProvider && !pin) throw new Error('Only pinned Claude Desktop conversations can be opened.');
+    if (pin) id = pin.cliId;
+    if (typeof id !== 'string' || !/^[a-f0-9-]{36}$/i.test(id)) throw new Error('Select a valid conversation.');
+    const { getSessionInfo, getSessionMessages } = this.sessionReader || await import('@anthropic-ai/claude-agent-sdk');
+    const info = await getSessionInfo(id, pin ? { dir: pin.project } : undefined);
+    if (!info?.cwd || !fs.existsSync(info.cwd)) throw new Error('The conversation’s project folder is no longer available.');
+    const history = await getSessionMessages(id, pin ? { dir: pin.project } : undefined);
+    if (pin && !history.length) throw new Error('The pinned conversation history is unavailable.');
+    if (pin && !this.pinnedProvider().some(item => item.id === pin.id && item.cliId === id)) throw new Error('Desktop changed the selected thread. Please select it again.');
+    const messages = this.historyMessages(history);
+    if (this.busy || this.promoting || this.syncing) throw new Error('Stop the current task before loading a conversation.');
     const project = fs.realpathSync(info.cwd);
     this.editingQueued = null;
     this.data.project = project;
     let context = this.data.sessions[project]?.sessionId === id ? this.data.sessions[project].context : null;
     for (const item of history) if (item.type === 'assistant' && !item.parent_tool_use_id) context = latestContext(item.message, context);
-    this.data.sessions[project] = { sessionId: id, title: info.customTitle || info.summary, messages, context };
+    this.data.sessions[project] = { sessionId: id, ...(pin ? { desktopSessionId: pin.id } : {}), title: pin?.title || info.customTitle || info.summary, messages, context, queued: this.data.sessions[project]?.sessionId === id ? this.data.sessions[project].queued || [] : [] };
+    if (pin && this.authReady) this.connection = { ready: true, detail: 'Claude Code connected' };
     this.save(); this.emit('snapshot', this.snapshot());
   }
   session() { return this.data.sessions[this.data.project]; }
@@ -195,12 +242,18 @@ class ClaudeService {
       if (!fs.existsSync(this.executable)) this.executable = 'claude';
       const { stdout } = await promisify(execFile)(this.executable, ['auth', 'status'], { windowsHide: true, timeout: 15000 });
       const auth = JSON.parse(stdout);
+      this.authReady = !!auth.loggedIn;
       this.connection = { ready: !!auth.loggedIn, detail: auth.loggedIn ? 'Claude Code connected' : 'Run claude auth login in a terminal, then reconnect.' };
     } catch { this.connection = { ready: false, detail: 'Could not connect. Install Claude Code and run claude auth login, then reconnect.' }; }
+    if (this.connection.ready) {
+      try { await this.refreshHistory(); }
+      catch (error) { this.connection = { ready: false, detail: `Could not sync conversation: ${error.message}` }; }
+    }
     this.emit('snapshot', this.snapshot()); return this.connection;
   }
   selectProject(project) {
-    if (this.busy || this.promoting) throw new Error('Stop the current task before switching addons.');
+    if (this.pinnedProvider) throw new Error('Choose a pinned conversation instead of a folder.');
+    if (this.busy || this.promoting || this.syncing) throw new Error('Stop the current task before switching addons.');
     if (!fs.statSync(project).isDirectory()) throw new Error('Select an addon folder.');
     this.editingQueued = null;
     this.data.project = fs.realpathSync(project);
@@ -208,7 +261,8 @@ class ClaudeService {
     this.save(); this.emit('snapshot', this.snapshot());
   }
   newChat() {
-    if (this.busy || this.promoting) throw new Error('Stop the current task before starting a new chat.');
+    if (this.pinnedProvider) throw new Error('Create and pin conversations in Claude Desktop.');
+    if (this.busy || this.promoting || this.syncing) throw new Error('Stop the current task before starting a new chat.');
     if (!this.session()) return;
     this.editingQueued = null;
     this.data.sessions[this.data.project] = { messages: [], sessionId: null };
@@ -268,6 +322,10 @@ class ClaudeService {
     }
     const item = { id: randomUUID(), role: 'You', text: text.trim(), time: Date.now(), images: validated.map(image => this.attachments.store(image)) };
     this.busy = true; this.controller = new AbortController();
+    try {
+      await this.refreshHistory();
+      if (this.controller.signal.aborted) throw new Error('Message stopped before sending.');
+    } catch (error) { this.busy = false; this.controller = null; this.emit('busy', false); throw error; }
     this.session().messages.push(item);
     try { this.save(); } catch (error) { this.session().messages.pop(); this.busy = false; this.controller = null; throw error; }
     this.emit('message', item);
@@ -282,6 +340,7 @@ class ClaudeService {
     try {
       const query = this.queryFactory || (await import('@anthropic-ai/claude-agent-sdk')).query;
       const options = {
+        forkSession: false,
         cwd: this.data.project, pathToClaudeCodeExecutable: this.executable,
         abortController: this.controller, includePartialMessages: true,
         permissionMode: this.data.permissionMode || 'default',
@@ -299,6 +358,7 @@ class ClaudeService {
       stream = query({ prompt, options });
       this.activeQuery = stream;
       for await (const event of stream) {
+        if (this.pinnedProvider && event.session_id && event.session_id !== options.resume) throw new Error('Claude Code returned a different session. Stopped to avoid continuing a fork.');
         if (event.session_id) this.session().sessionId = event.session_id;
         if (event.type === 'system' && event.subtype === 'init') this.reportModel(event.model);
         if (event.type === 'system' && event.subtype === 'compact_boundary') {

@@ -10,5 +10,6 @@ conversations.json
 conversations.json.tmp
 conversations.json.attachments/
 conversations.json.legacy-backup
+conversations.json.sync-backup
 preferences.json
 preferences.json.tmp

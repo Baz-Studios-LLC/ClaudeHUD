@@ -10,6 +10,7 @@ files:
   - message-format.js
   - claude-service.js
   - attachment-store.js
+  - desktop-pins.js
   - context-usage.js
   - preferences.js
   - updater.js

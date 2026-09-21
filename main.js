@@ -1,6 +1,7 @@
 const { app, BrowserWindow, ipcMain, globalShortcut, screen, Tray, Menu, nativeImage, dialog, desktopCapturer, clipboard, shell, protocol } = require('electron');
 const { captureGame } = require('./game-capture');
 const { ClaudeService } = require('./claude-service');
+const { readDesktopPins } = require('./desktop-pins');
 const { createUpdater } = require('./updater');
 const { Preferences, fitBounds } = require('./preferences');
 const path = require('node:path');
@@ -253,7 +254,7 @@ app.whenReady().then(async () => {
   } });
   updates.start();
   if (!smoke) {
-    claude = new ClaudeService({ storage: path.join(app.getPath('userData'), 'conversations.json'), emit: claudeEvent, showThinking: () => preferences.value.showThinking });
+    claude = new ClaudeService({ storage: path.join(app.getPath('userData'), 'conversations.json'), emit: claudeEvent, pinnedProvider: readDesktopPins, showThinking: () => preferences.value.showThinking });
     panel.webContents.send('claude-event', { type: 'snapshot', data: claude.snapshot() });
     void claude.connect();
   }
@@ -469,6 +470,11 @@ app.whenReady().then(async () => {
       nativeDialogOpen = false; await collapseOnBlur();
       if (expanded || panel.getBounds().height !== compactSize.height) throw new Error('Blur did not collapse panel');
       await openPanel();
+      await panel.webContents.executeJavaScript(`document.querySelector('#prompt').value = 'Unsent draft'; attachments = [{ type: 'image/png', data: 'draft-image' }];`);
+      panel.webContents.send('claude-event', { type: 'history', data: { title: 'Updated Desktop history', context: null, messages: [{ id: 'synced-history', role: 'Claude', text: 'New Desktop response' }] } });
+      await new Promise(resolve => setTimeout(resolve, 100));
+      const syncResult = await panel.webContents.executeJavaScript(`document.querySelector('#prompt').value === 'Unsent draft' && attachments[0]?.data === 'draft-image' && document.querySelector('#messages').textContent.includes('New Desktop response')`);
+      if (!syncResult) throw new Error('History refresh lost composer draft or failed to render');
       fs.writeFileSync(path.join(__dirname, 'artifacts', 'smoke.json'), JSON.stringify({ passed: true, ...result, historyPerformance }, null, 2));
       app.exit(0);
     } catch (error) { console.error(error); app.exit(1); }
@@ -532,14 +538,7 @@ ipcMain.handle('claude', async (event, action, value) => {
     if (action === 'list-conversations') return { conversations: await claude.listConversations() };
     if (action === 'load-conversation') await claude.loadConversation(value);
     if (action === 'connect') return await claude.connect();
-    if (action === 'project') {
-      if (claude.busy) throw new Error('Stop the current task before switching addons.');
-      nativeDialogOpen = true;
-      try {
-        const result = await dialog.showOpenDialog(panel, { title: 'Choose your WoW addon folder', properties: ['openDirectory'] });
-        if (!result.canceled) claude.selectProject(result.filePaths[0]);
-      } finally { nativeDialogOpen = false; panel.focus(); }
-    }
+    if (action === 'project' || action === 'new-chat') throw new Error('Create and pin conversations in Claude Desktop, then select them here.');
     if (action === 'send') await claude.send(value);
     if (action === 'usage') return await claude.usage();
     if (action === 'compact') { void claude.compact().catch(error => claudeEvent('failure', { text: error.message })); }
@@ -549,13 +548,6 @@ ipcMain.handle('claude', async (event, action, value) => {
     if (action === 'send-queued-now') await claude.sendQueuedNow(value);
     if (action === 'stop') claude.stop();
     if (action === 'respond') claude.respond(value);
-    if (action === 'new-chat') {
-      nativeDialogOpen = true;
-      try {
-        const choice = await dialog.showMessageBox(panel, { type: 'question', message: 'Start a fresh conversation for this addon?', buttons: ['Cancel', 'New chat'], defaultId: 0, cancelId: 0 });
-        if (choice.response === 1) claude.newChat();
-      } finally { nativeDialogOpen = false; panel.focus(); }
-    }
     return { ok: true };
   } catch (error) { return { error: error.message }; }
 });

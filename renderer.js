@@ -355,6 +355,14 @@ function permission(data) {
   card.append(buttons); requests.set(data.id, card); $('#messages').append(card); scrollToBottom(); sound();
 }
 bridge.onClaude(({ type, data }) => {
+  if (type === 'history') {
+    pendingMessages.clear();
+    $('#messages').innerHTML = welcome; messageNodes.clear();
+    for (const item of data.messages) message(item, false);
+    $('#conversation-title').textContent = data.title || 'Addon conversation';
+    $('#choose-project').textContent = `${data.title || 'Pinned conversation'} ▾`;
+    contextUsage(data.context); scrollToBottom(); refreshSearch();
+  }
   if (type === 'snapshot') {
     if (!data.queued?.some(item => item.id === queueEditor?.id)) queueEditor = null;
     pendingMessages.clear();
@@ -366,9 +374,9 @@ bridge.onClaude(({ type, data }) => {
     permissionMode = data.permissionMode || 'default'; $('#permission-mode').value = permissionMode;
     $('#conversation-title').textContent = data.title || 'Addon conversation';
     $('#conversation-title').title = data.title || 'Addon conversation';
-    $('#choose-project').textContent = project ? project.split(/[\\/]/).pop() + ' ▾' : 'Choose addon folder ▾';
-    $('#choose-project').title = project || 'Choose your WoW addon folder';
-    $('#connection-detail').textContent = connected ? (project ? 'Working in your selected addon folder.' : 'Choose your addon folder to start a conversation.') : data.connection.detail;
+    $('#choose-project').textContent = project ? `${data.title || 'Pinned conversation'} ▾` : 'Choose pinned thread ▾';
+    $('#choose-project').title = project || 'Open a pinned Claude Desktop conversation';
+    $('#connection-detail').textContent = connected ? (project ? 'Connected to your pinned conversation.' : 'Choose a pinned Claude Desktop conversation.') : data.connection.detail;
     $('#connection-banner').hidden = connected && !!project;
     $('#messages').innerHTML = welcome; messageNodes.clear(); requests.clear();
     for (const item of data.messages) message(item, false); scrollToBottom(); controls(); refreshSearch();
@@ -424,7 +432,7 @@ $('#fullscreen-toggle').onclick = () => action('fullscreen');
 $('#toast').onclick = () => action('open');
 $('#settings-toggle').onclick = () => showSettings($('#settings').hidden);
 $('#settings-close').onclick = () => showSettings(false); $('#quit').onclick = () => action('quit');
-$('#choose-project').onclick = () => claude('project'); $('#reconnect').onclick = () => { if (!busy) claude('connect'); };
+$('#choose-project').onclick = () => { showSettings(true); $('#conversations-open').click(); }; $('#reconnect').onclick = () => { if (!busy) claude('connect'); };
 $('#new-chat').onclick = () => claude('new-chat');
 $('#stop').onclick = () => claude('stop');
 $('#opacity').oninput = event => action('opacity', Number(event.target.value) / 100);
@@ -557,12 +565,12 @@ let conversations = [];
 function renderConversations() {
   const search = $('#conversation-search').value.toLowerCase();
   $('#conversation-list').replaceChildren();
-  const matches = conversations.filter(item => `${item.title} ${item.project}`.toLowerCase().includes(search));
+  const matches = conversations.filter(item => `${item.title} ${item.project} ${item.id}`.toLowerCase().includes(search));
   for (const item of matches) {
     const button = document.createElement('button'); button.className = 'conversation-item';
     const title = document.createElement('strong'); title.textContent = item.title;
     const folder = document.createElement('small'); folder.textContent = item.project;
-    const date = document.createElement('small'); date.textContent = new Date(item.modified).toLocaleString();
+    const date = document.createElement('small'); date.textContent = `${new Date(item.modified).toLocaleString()} · ${item.id.slice(0, 8)}`;
     button.append(title, folder, date);
     button.onclick = async () => {
       for (const row of $('#conversation-list').children) row.disabled = true;
@@ -579,7 +587,7 @@ $('#conversations-open').onclick = async () => {
   $('#conversation-picker').hidden = false; $('#conversation-note').textContent = 'Loading recent conversations…';
   const result = await claude('list-conversations');
   conversations = result?.conversations || [];
-  $('#conversation-note').textContent = 'Continue a saved conversation. Finish any active turn in the desktop app first.';
+  $('#conversation-note').textContent = result ? 'Pinned local Desktop conversations. Finish any active Desktop turn before sending here.' : 'Could not read Desktop pins. See the error in chat.';
   renderConversations(); $('#conversation-search').focus();
 };
 $('#conversations-close').onclick = () => { $('#conversation-picker').hidden = true; };
