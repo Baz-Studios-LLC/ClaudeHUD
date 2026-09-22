@@ -306,7 +306,7 @@ test('streams once, resumes correct session, and restores saved project history'
   await service.send('Hi'); await idle(service); await service.send('Again'); await idle(service);
   assert.equal(service.session().messages.length, 4); assert.equal(options[1].resume, 'session-a');
   const restored = new ClaudeService({ storage: path.join(root, 'state.json'), emit() {} });
-  assert.equal(restored.session().messages.length, 4); assert.equal(restored.snapshot().project, root);
+  assert.equal(restored.session().messages.length, 4); assert.equal(restored.snapshot().project, fs.realpathSync(root));
 });
 test('permission prompts wait, deny, allow original input, and reject stale replies', async () => {
   const { service, events } = fixture(); const signal = new AbortController().signal;

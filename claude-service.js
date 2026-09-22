@@ -177,7 +177,7 @@ class ClaudeService {
       for (const item of history) if (item.type === 'assistant' && !item.parent_tool_use_id) context = latestContext(item.message, context);
       const previous = { ...session };
       if (fs.existsSync(this.storage) && !fs.existsSync(this.storage + '.sync-backup')) fs.copyFileSync(this.storage, this.storage + '.sync-backup');
-      if (project !== this.data.project) throw new Error('Desktop changed the project folder. Reselect the pinned conversation.');
+      if (project !== this.data.project && fs.realpathSync(project) !== fs.realpathSync(this.data.project)) throw new Error('Desktop changed the project folder. Reselect the pinned conversation.');
       Object.assign(session, { messages, context, sessionId: id, ...(pin ? { desktopSessionId: pin.id } : {}), title: pin?.title || info.customTitle || info.summary || session.title });
       try { this.save(); } catch (error) { Object.assign(session, previous); throw error; }
       this.emit('history', this.snapshot());
