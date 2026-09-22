@@ -1,6 +1,16 @@
 # ClaudeHUD
 
-A Windows overlay for working with Claude Code while playing World of Warcraft in borderless windowed mode.
+An overlay for working with Claude Code while playing World of Warcraft in borderless windowed mode. Windows and experimental Apple Silicon macOS builds are available.
+
+## Apple Silicon Mac
+
+Download the `mac-arm64.dmg` from GitHub Releases and drag ClaudeHUD into Applications. This build is ad-hoc signed, not Apple-notarized; approve it in System Settings → Privacy & Security if macOS blocks opening it. Intel Macs are not included.
+
+Install Claude Desktop and Claude Code on the Mac, sign in with `claude auth login`, and pin the local Code conversation you want in Desktop. ClaudeHUD reads Desktop metadata from `~/Library/Application Support/Claude/claude-code-sessions` and detects Claude Code in `~/.local/bin` or Homebrew locations. Windows-local conversations are not copied to your Mac by installing ClaudeHUD.
+
+Use **Settings → Pinned conversations** to select a thread. The overlay shortcut uses **Command + Shift + Space** on Mac. Game screenshots require macOS Screen Recording permission. Fullscreen-game overlay behavior and real Desktop thread integration still need testing on a Mac.
+
+Mac updates are manual for now: **Check for updates** opens GitHub Releases. Download and replace the app in Applications. Apple Developer signing is needed before enabling automatic Mac updates. Build locally on macOS with `npm run dist:mac -- --publish never`.
 
 ## Start
 

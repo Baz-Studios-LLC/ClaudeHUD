@@ -1,15 +1,16 @@
 {
   "name": "claudehud",
-  "version": "0.1.21",
+  "version": "0.1.22",
   "description": "A quiet companion for building WoW addons with Claude",
   "main": "main.js",
   "private": true,
   "scripts": {
     "start": "electron .",
-    "check": "node --check main.js && node --check preload.js && node --check renderer.js && node --check claude-service.js && node --check updater.js && node --check context-usage.js && node --check preferences.js && node --check game-capture.js && node --check message-format.js",
+    "check": "node --check main.js && node --check preload.js && node --check renderer.js && node --check claude-service.js && node --check updater.js && node --check context-usage.js && node --check preferences.js && node --check game-capture.js && node --check message-format.js && node --check desktop-pins.js && node --check platform-paths.js",
     "smoke": "electron . --smoke-test",
-    "test": "node --test claude-service.test.js updater.test.js context-usage.test.js preferences.test.js game-capture.test.js message-format.test.js",
-    "dist": "electron-builder --win nsis --x64"
+    "test": "node --test claude-service.test.js updater.test.js context-usage.test.js preferences.test.js game-capture.test.js message-format.test.js platform-paths.test.js",
+    "dist": "electron-builder --win nsis --x64",
+    "dist:mac": "electron-builder --mac --arm64"
   },
   "devDependencies": {
     "electron": "^41.0.0",

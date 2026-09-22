@@ -11,6 +11,7 @@ files:
   - claude-service.js
   - attachment-store.js
   - desktop-pins.js
+  - platform-paths.js
   - context-usage.js
   - preferences.js
   - updater.js
@@ -21,6 +22,17 @@ files:
   - assets/tray-icon.png
   - package.json
 asar: true
+mac:
+  target:
+    - target: dmg
+      arch: [arm64]
+    - target: zip
+      arch: [arm64]
+  category: public.app-category.developer-tools
+  icon: assets/app-icon.png
+  identity: '-'
+  hardenedRuntime: false
+  artifactName: ClaudeHUD-${version}-mac-${arch}.${ext}
 win:
   target:
     - target: nsis

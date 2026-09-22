@@ -6,7 +6,7 @@ test('installed updater downloads but never restarts an active Claude task', asy
   const engine = new EventEmitter(); let busy = true, installed = 0, checks = 0;
   engine.checkForUpdates = async () => { checks++; engine.emit('update-available', { version: '0.2.0' }); };
   engine.quitAndInstall = (silent, relaunch) => { assert.equal(silent, true); assert.equal(relaunch, true); installed++; };
-  const updater = createUpdater({ app: { isPackaged: true, getVersion: () => '0.1.0' }, updater: engine, emit() {}, isBusy: () => busy });
+  const updater = createUpdater({ platform: 'win32', app: { isPackaged: true, getVersion: () => '0.1.0' }, updater: engine, emit() {}, isBusy: () => busy });
   assert.equal(engine.autoInstallOnAppQuit, false); assert.equal(engine.autoDownload, true);
   await updater.check(); await updater.check(); assert.equal(checks, 1);
   engine.emit('update-downloaded', { version: '0.2.0' });
@@ -16,4 +16,13 @@ test('installed updater downloads but never restarts an active Claude task', asy
 test('development builds do not contact update servers', async () => {
   const updater = createUpdater({ app: { isPackaged: false, getVersion: () => '0.1.0' }, updater: {}, emit() {}, isBusy: () => false });
   await updater.check(); assert.equal(updater.snapshot().phase, 'development'); assert.ok(updater.install().error); updater.dispose();
+});
+
+test('Mac builds use manual downloads without initializing automatic updates', async () => {
+  let opened = 0;
+  const updater = createUpdater({ platform: 'darwin', app: { isPackaged: true, getVersion: () => '0.1.22' }, updater: {}, emit() {}, isBusy: () => false, openReleases: async () => { opened++; } });
+  updater.start(); assert.equal(opened, 0);
+  assert.equal(updater.snapshot().phase, 'manual');
+  await updater.check(); assert.equal(opened, 1);
+  assert.ok(updater.install().error); updater.dispose();
 });

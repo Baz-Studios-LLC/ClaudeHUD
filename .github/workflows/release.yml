@@ -1,12 +1,22 @@
-name: Windows release
+name: Desktop release
 on:
   push:
     tags: ['v*']
 permissions:
   contents: write
 jobs:
-  release:
-    runs-on: windows-latest
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            platform: windows
+            command: npm run dist -- --publish never
+          - os: macos-14
+            platform: mac
+            command: npm run dist:mac -- --publish never
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -21,15 +31,31 @@ jobs:
         run: |
           $version = node -p "require('./package.json').version"
           if ($env:GITHUB_REF_NAME -ne "v$version") { throw 'Tag and package version must match' }
-      - run: npm run dist -- --publish never
-      - name: Publish installer and update metadata together
-        shell: pwsh
+      - run: ${{ matrix.command }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.platform }}
+          if-no-files-found: error
+          path: |
+            dist/*.exe
+            dist/*.blockmap
+            dist/*.dmg
+            dist/*.zip
+            dist/latest*.yml
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          merge-multiple: true
+          path: release
+      - name: Publish installers and update metadata together
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
         run: |
-          gh release create $env:GITHUB_REF_NAME --draft --title "ClaudeHUD $env:GITHUB_REF_NAME" --generate-notes
-          if ($LASTEXITCODE -ne 0) { throw 'Could not create release' }
-          $assets = Get-ChildItem dist -File | Where-Object { $_.Extension -in '.exe', '.blockmap' -or $_.Name -eq 'latest.yml' } | ForEach-Object FullName
-          gh release upload $env:GITHUB_REF_NAME @assets
-          if ($LASTEXITCODE -ne 0) { throw 'Could not upload release assets' }
-          gh release edit $env:GITHUB_REF_NAME --draft=false
+          gh release create "$GITHUB_REF_NAME" --draft --title "ClaudeHUD $GITHUB_REF_NAME" --generate-notes
+          gh release upload "$GITHUB_REF_NAME" release/*
+          gh release edit "$GITHUB_REF_NAME" --draft=false

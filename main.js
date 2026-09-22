@@ -238,6 +238,7 @@ app.whenReady().then(async () => {
   for (const win of [panel, toast]) {
     if (smoke) win.webContents.on('console-message', event => console.log('Renderer:', event.message));
     win.setAlwaysOnTop(true, 'screen-saver');
+    if (process.platform === 'darwin') win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
     win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
     win.webContents.on('will-navigate', event => event.preventDefault());
   }
@@ -248,7 +249,7 @@ app.whenReady().then(async () => {
   panel.webContents.send('expansion', { expanded, transitioning: false });
   if (expanded && windowMode !== 'normal') applyWindowMode(); else sendWindowMode();
   setupTray(); sendState(); if (expanded) panel.show(); else panel.showInactive();
-  updates = createUpdater({ app, updater: require('electron-updater').autoUpdater, isBusy: () => !!(claude?.busy || claude?.promoting || capturing), emit: value => {
+  updates = createUpdater({ app, openReleases: () => shell.openExternal('https://github.com/Baz-Studios-LLC/ClaudeHUD/releases/latest'), updater: require('electron-updater').autoUpdater, isBusy: () => !!(claude?.busy || claude?.promoting || capturing), emit: value => {
     panel.webContents.send('update-status', value);
     if (value.phase === 'ready') notify('ClaudeHUD update ready', 'Open Settings to restart and install.');
   } });

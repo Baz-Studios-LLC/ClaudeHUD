@@ -1,6 +1,6 @@
 const fs = require('node:fs');
 const path = require('node:path');
-function readDesktopPins(root = path.join(process.env.APPDATA || '', 'Claude', 'claude-code-sessions')) {
+function readDesktopPins(root = require('./platform-paths').desktopDataRoot()) {
   if (!fs.existsSync(root)) throw new Error('Claude Desktop pinned conversations are unavailable. Open Claude Desktop first.');
   const pins = [];
   function scan(directory, depth) {

@@ -237,7 +237,7 @@ class ClaudeService {
   }
   async connect() {
     if (this.storageError) { this.connection = { ready: false, detail: this.storageError }; this.emit('snapshot', this.snapshot()); return this.connection; }
-    this.executable = path.join(os.homedir(), '.local', 'bin', 'claude.exe');
+    this.executable = require('./platform-paths').claudeExecutable();
     try {
       if (!fs.existsSync(this.executable)) this.executable = 'claude';
       const { stdout } = await promisify(execFile)(this.executable, ['auth', 'status'], { windowsHide: true, timeout: 15000 });

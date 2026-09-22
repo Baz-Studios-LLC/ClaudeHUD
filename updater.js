@@ -1,4 +1,8 @@
-function createUpdater({ app, updater, emit, isBusy }) {
+function createUpdater({ app, updater, emit, isBusy, platform = process.platform, openReleases }) {
+  if (app.isPackaged && platform === 'darwin') {
+    const state = { phase: 'manual', version: app.getVersion(), detail: 'Mac updates are manual for now. Check for updates opens GitHub downloads.' };
+    return { snapshot: () => state, start: () => emit(state), check: async () => { await openReleases?.(); return state; }, install: () => ({ error: 'Download the latest Mac release from GitHub.' }), dispose() {} };
+  }
   let state = { phase: app.isPackaged ? 'idle' : 'development', version: app.getVersion(), detail: app.isPackaged ? 'Ready to check for updates.' : 'Updates are available in the installed app.' };
   let checking = false, installing = false, interval, startup;
   const publish = (phase, detail, extra = {}) => { state = { ...state, ...extra, phase, detail }; emit(state); };
